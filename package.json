@@ -6,10 +6,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "scan": "node src/scan.js",
-    "encrypt": "node src/encrypt.js",
-    "build": "node src/scan.js && node src/encrypt.js",
+    "build": "node src/scan.js && node src/publish.js",
     "serve": "node scripts/serve.js",
-    "t212": "node scripts/t212-check.js"
+    "t212": "node scripts/t212-check.js",
+    "publish": "node src/publish.js"
   },
   "keywords": [],
   "author": "",

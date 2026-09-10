@@ -1,37 +1,17 @@
 'use strict';
 
-// Data arrives encrypted; the password never leaves the browser and is only held
-// in sessionStorage so a phone refresh does not ask again within the same session.
-const DATA_URL = 'data/latest.enc.json';
-const SESSION_KEY = 'watchlist-pw';
+// Loads the scan output and renders it. There is no login: the published build
+// carries only market data and scores, and the local build never leaves this PC.
+const DATA_URL = 'data/site.json';
 const GH_KEY = 'watchlist-gh';
 
 const $ = (id) => document.getElementById(id);
-const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtWhen = (d) => new Date(d).toLocaleString('en-GB',
   { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-let current = null; // last decrypted payload, so Refresh can compare
-
-async function decrypt(payload, password) {
-  const material = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']
-  );
-  const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: fromB64(payload.salt), iterations: payload.kdf.iterations, hash: payload.kdf.hash },
-    material,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt']
-  );
-  // A wrong password fails the GCM auth tag and throws, which is our auth check.
-  const plain = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: fromB64(payload.iv) }, key, fromB64(payload.ciphertext)
-  );
-  return JSON.parse(new TextDecoder().decode(plain));
-}
+let current = null; // last loaded payload, so Refresh can compare
 
 const fetchPayload = () => fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' })
   .then((r) => { if (!r.ok) throw new Error(`Could not load data (HTTP ${r.status})`); return r.json(); });
@@ -448,48 +428,33 @@ function render(data) {
     $('scan-status').textContent = 'Updates automatically each weekday morning.';
   }
 
-  $('gate').hidden = true;
   $('app').hidden = false;
   if (!data.publicBuild) refreshT212State();
 }
 
-/* ---------- gate ---------- */
+/* ---------- loading ---------- */
 
-async function unlock(password, { silent = false } = {}) {
-  const btn = $('unlock');
-  const err = $('gate-error');
-  err.hidden = true;
-  btn.disabled = true;
-  btn.textContent = 'Decrypting…';
+async function load() {
   try {
-    render(await decrypt(await fetchPayload(), password));
-    sessionStorage.setItem(SESSION_KEY, password);
+    render(await fetchPayload());
   } catch (e) {
-    sessionStorage.removeItem(SESSION_KEY);
-    if (!silent) {
-      err.textContent = e.message.startsWith('Could not load') ? e.message : 'Wrong password.';
-      err.hidden = false;
-    }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Unlock';
+    const box = $('errors');
+    box.hidden = false;
+    box.textContent = `${e.message} — has a scan run yet?`;
+    $('app').hidden = false;
   }
 }
 
-/* ---------- refresh: re-read whatever is published now ---------- */
-
 async function refresh() {
-  const password = sessionStorage.getItem(SESSION_KEY);
-  if (!password) return;
   const btn = $('refresh');
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    const payload = await fetchPayload();
-    if (current && payload.generatedAt === current.generatedAt) {
+    const data = await fetchPayload();
+    if (current && data.generatedAt === current.generatedAt) {
       btn.textContent = 'No change';
     } else {
-      render(await decrypt(payload, password));
+      render(data);
       btn.textContent = 'Updated';
     }
   } catch {
@@ -499,14 +464,16 @@ async function refresh() {
   }
 }
 
-/* ---------- run a new scan via GitHub Actions ----------
- * The dashboard is a static page, so it cannot run the scanner itself and the
- * browser cannot call Yahoo directly (no CORS). Instead this asks GitHub to run
- * the same workflow the daily schedule uses, then waits for the new file.
- * The token lives in this browser's localStorage only, never in the repository.
- */
+/* ---------- running a new scan ---------- */
 
-const ghConfig = () => { try { return JSON.parse(localStorage.getItem(GH_KEY)) || null; } catch { return null; } };
+const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+const GH_KEY_STORE = () => { try { return JSON.parse(localStorage.getItem(GH_KEY)) || null; } catch { return null; } };
+
+const status = (msg, kind = '') => {
+  const el = $('scan-status');
+  el.textContent = msg;
+  el.className = `scan-status ${kind}`;
+};
 
 /** Guess owner/repo from a github.io URL so the setup form is mostly pre-filled. */
 function guessRepo() {
@@ -516,22 +483,38 @@ function guessRepo() {
   return { owner: m[1], repo: seg || `${m[1]}.github.io` };
 }
 
-const status = (msg, kind = '') => {
-  const el = $('scan-status');
-  el.textContent = msg;
-  el.className = `scan-status ${kind}`;
-};
-
 function showSetup(message = '') {
-  // Clear any previous error, otherwise a stale "token rejected" sits above an
-  // empty form and looks like a fresh failure.
   status(message);
-  const cfg = ghConfig() ?? guessRepo();
+  const cfg = GH_KEY_STORE() ?? guessRepo();
   $('gh-owner').value = cfg.owner ?? '';
   $('gh-repo').value = cfg.repo ?? '';
   $('gh-token').value = '';
   $('gh-setup').hidden = false;
-  $('gh-owner').focus();
+}
+
+/** On this machine the local server runs the scanner directly — no GitHub, no token. */
+async function runScanLocally() {
+  const btn = $('scan-btn');
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+  status('Fetching prices and news for every stock… about 10 seconds.');
+  const previousAsOf = current?.dataAsOf;
+  try {
+    const res = await fetch('/api/scan', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Scan failed (HTTP ${res.status})`);
+
+    const data = await fetchPayload();
+    render(data);
+    status(data.dataAsOf === previousAsOf
+      ? `Updated in ${body.seconds}s. News refreshed; prices unchanged (still the ${data.dataAsOf} close).`
+      : `Updated in ${body.seconds}s. Prices now to ${data.dataAsOf}.`, 'ok');
+  } catch (e) {
+    status(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run new scan';
+  }
 }
 
 async function triggerWorkflow(cfg) {
@@ -554,83 +537,38 @@ async function triggerWorkflow(cfg) {
 }
 
 /** Poll the published file until generatedAt moves past what we already have. */
-async function waitForNewData(previousGeneratedAt, password) {
+async function waitForNewData(previousGeneratedAt) {
   const deadline = Date.now() + 5 * 60 * 1000;
   const started = Date.now();
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 6000));
-    const secs = Math.round((Date.now() - started) / 1000);
-    status(`Scanning on GitHub… ${secs}s. This usually takes 1–3 minutes.`);
+    status(`Scanning on GitHub… ${Math.round((Date.now() - started) / 1000)}s. This usually takes 1–3 minutes.`);
     try {
-      const payload = await fetchPayload();
-      if (payload.generatedAt !== previousGeneratedAt) {
-        return await decrypt(payload, password);
-      }
+      const data = await fetchPayload();
+      if (data.generatedAt !== previousGeneratedAt) return data;
     } catch { /* Pages can 404 briefly mid-deploy; keep waiting. */ }
   }
   throw new Error('Timed out waiting for the new scan. Check the Actions tab on GitHub.');
 }
 
-const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
-
-/**
- * On this machine the local server can run the scanner directly, so no GitHub
- * and no token are involved. Takes about 30 seconds instead of 1-3 minutes.
- */
-async function runScanLocally(password) {
-  const btn = $('scan-btn');
-  btn.disabled = true;
-  btn.textContent = 'Scanning…';
-  status('Fetching prices and news for all 30 stocks… about 30 seconds.');
-  const previousAsOf = current?.dataAsOf;
-  try {
-    const res = await fetch('/api/scan', { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Scan failed (HTTP ${res.status})`);
-
-    const data = await decrypt(await fetchPayload(), password);
-    render(data);
-    status(data.dataAsOf === previousAsOf
-      ? `Updated in ${body.seconds}s. News refreshed; prices unchanged (still the ${data.dataAsOf} close).`
-      : `Updated in ${body.seconds}s. Prices now to ${data.dataAsOf}.`, 'ok');
-  } catch (e) {
-    status(e.message, 'err');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Run new scan';
-  }
-}
-
 async function runScan() {
-  const password = sessionStorage.getItem(SESSION_KEY);
-  if (!password) return;
+  if (isLocal) { await runScanLocally(); return; }
 
-  if (isLocal) { await runScanLocally(password); return; }
-
-  const cfg = ghConfig();
+  const cfg = GH_KEY_STORE();
   if (!cfg?.token) { showSetup(); return; }
 
   const btn = $('scan-btn');
   btn.disabled = true;
   btn.textContent = 'Scanning…';
   const previous = current?.generatedAt;
-  const previousAsOf = current?.dataAsOf;
-
   try {
     status('Asking GitHub to start the scan…');
     await triggerWorkflow(cfg);
-    const data = await waitForNewData(previous, password);
-    render(data);
-
-    // Yahoo is end-of-day on the free tier, so outside US market hours a rescan
-    // brings fresh news but identical prices. Say so rather than implying new prices.
-    status(data.dataAsOf === previousAsOf
-      ? `Updated. News refreshed; prices unchanged (still the ${data.dataAsOf} close).`
-      : `Updated. Prices now to ${data.dataAsOf}.`, 'ok');
+    render(await waitForNewData(previous));
+    status('Updated.', 'ok');
   } catch (e) {
     if (/Token|permission|expired|not found/i.test(e.message)) showSetup(e.message);
     else status(e.message, 'err');
-    if ($('gh-setup').hidden === false) $('scan-status').className = 'scan-status err';
   } finally {
     btn.disabled = false;
     btn.textContent = 'Run new scan';
@@ -710,7 +648,6 @@ $('t212-remove')?.addEventListener('click', async () => {
 
 /* ---------- wiring ---------- */
 
-$('gate-form').addEventListener('submit', (e) => { e.preventDefault(); unlock($('password').value.trim()); });
 $('refresh').addEventListener('click', refresh);
 $('scan-btn').addEventListener('click', runScan);
 $('gh-cancel').addEventListener('click', () => { $('gh-setup').hidden = true; status(''); });
@@ -729,11 +666,6 @@ $('gh-setup').addEventListener('submit', (e) => {
   runScan();
 });
 
-$('lock').addEventListener('click', () => {
-  sessionStorage.removeItem(SESSION_KEY);
-  location.reload();
-});
-
 const PANELS = ['long', 'swing', 'portfolio'];
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -742,15 +674,4 @@ document.querySelectorAll('.tab').forEach((tab) => {
   });
 });
 
-// Show when the data was generated before the user commits to typing a password.
-fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' })
-  .then((r) => (r.ok ? r.json() : null))
-  .then((p) => {
-    if (p?.generatedAt) {
-      $('gate-sub').textContent = `Scan from ${fmtWhen(p.generatedAt)}. Enter your password to decrypt.`;
-    }
-  })
-  .catch(() => {});
-
-const saved = sessionStorage.getItem(SESSION_KEY);
-if (saved) unlock(saved, { silent: true });
+load();

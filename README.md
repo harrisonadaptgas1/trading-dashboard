@@ -1,8 +1,7 @@
 # Watchlist Dashboard
 
 A private daily screening tool for a 30-stock watchlist. It scans once each weekday
-morning, scores every stock against rules we defined, and publishes an encrypted
-mobile-friendly page.
+morning, scores every stock against rules we defined, and publishes a mobile-friendly page.
 
 **It is a screening tool, not advice.** A score says how well a stock matches our
 criteria on the day. Nothing here predicts what a price will do.
@@ -15,20 +14,18 @@ That starts the local server and opens the dashboard. Leave the black window ope
 while you use it. The **Run new scan** button then works directly on this machine —
 about 10 seconds, no GitHub and no token involved.
 
-Your password lives on one line at the top of `start-dashboard.bat`; edit it there
-and re-run the scan to change it. The file is gitignored so it never leaves your PC.
+There is no password. The local build stays on this PC; the published build
+carries only market data and scores.
 
 ## Running it from a terminal instead
 
 ```bash
 npm install
 npm run scan                              # fetch + score -> public/data/latest.json
-DASHBOARD_PASSWORD=your-password npm run encrypt
-DASHBOARD_PASSWORD=your-password npm run serve   # http://localhost:4173
+npm run publish                           # build the file the dashboard reads
+npm run serve                             # http://localhost:4173
 ```
 
-The password is needed by `serve` too, because the local **Run new scan** endpoint
-re-encrypts the results after each scan.
 
 Useful during development:
 
@@ -37,7 +34,14 @@ node src/scan.js --tickers=AAPL,TSLA      # just these two
 node src/scan.js --limit=3                # first 3 of each category
 ```
 
-`npm run build` does the scan and the encrypt in one step.
+`npm run build` does the scan and the publish in one step.
+
+### Local build vs published build
+
+`npm run publish` keeps everything, including your portfolio, and is what the
+local dashboard reads. `npm run publish --public` strips the portfolio, holdings
+and "you hold this" badges — that is what the GitHub workflow runs, and it refuses
+to write the file at all if anything personal survives the strip.
 
 ---
 

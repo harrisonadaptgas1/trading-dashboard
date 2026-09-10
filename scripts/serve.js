@@ -1,5 +1,4 @@
-// Minimal static server for local preview. Web Crypto needs a secure context,
-// and localhost counts as one, so this is enough to test the real decrypt flow.
+// Minimal static server for the local dashboard, plus the on-demand scan endpoint.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -82,11 +81,6 @@ async function handleSettings(req, res) {
  * locally without GitHub. Only ever reachable from localhost.
  */
 async function handleScan(res) {
-  if (!process.env.DASHBOARD_PASSWORD) {
-    res.writeHead(400, { 'Content-Type': 'application/json' })
-       .end(JSON.stringify({ error: 'Server was started without DASHBOARD_PASSWORD. Use start-dashboard.bat.' }));
-    return;
-  }
   if (scanning) {
     res.writeHead(409, { 'Content-Type': 'application/json' })
        .end(JSON.stringify({ error: 'A scan is already running.' }));
@@ -97,7 +91,7 @@ async function handleScan(res) {
   try {
     console.log('Scan requested from the dashboard...');
     await run(process.execPath, [join(ROOT, 'src/scan.js')], { cwd: ROOT, maxBuffer: 1024 * 1024 * 10 });
-    await run(process.execPath, [join(ROOT, 'src/encrypt.js')], { cwd: ROOT });
+    await run(process.execPath, [join(ROOT, 'src/publish.js')], { cwd: ROOT });
     const secs = ((Date.now() - started) / 1000).toFixed(0);
     console.log(`Scan finished in ${secs}s`);
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, seconds: Number(secs) }));

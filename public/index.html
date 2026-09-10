@@ -15,18 +15,7 @@
 </head>
 <body>
 
-<div id="gate" class="gate">
-  <form id="gate-form" class="gate-box" autocomplete="on">
-    <h1>Watchlist</h1>
-    <p class="gate-sub" id="gate-sub">Enter your password to decrypt today&rsquo;s scan.</p>
-    <input type="password" id="password" name="password" placeholder="Password"
-           autocomplete="current-password" required aria-label="Password">
-    <button type="submit" id="unlock">Unlock</button>
-    <p class="gate-error" id="gate-error" role="alert" hidden></p>
-  </form>
-</div>
-
-<main id="app" hidden>
+<main id="app">
   <header class="head">
     <div>
       <h1>Watchlist</h1>
@@ -34,7 +23,6 @@
     </div>
     <div class="head-actions">
       <button id="refresh" class="lock" title="Re-check for a newer scan">Refresh</button>
-      <button id="lock" class="lock" title="Lock">Lock</button>
     </div>
   </header>
 

@@ -35,10 +35,8 @@ jobs:
       - name: Scan watchlist
         run: npm run scan
 
-      - name: Encrypt results
-        env:
-          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-        run: node src/encrypt.js --public
+      - name: Build the public site data
+        run: node src/publish.js --public
 
       # Committing daily also keeps the repo active, which stops GitHub
       # auto-disabling scheduled workflows after 60 days of inactivity.
@@ -46,7 +44,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f public/data/latest.enc.json
+          git add -f public/data/site.json
           if git diff --staged --quiet; then
             echo "No change in scan output"
           else
