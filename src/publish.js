@@ -42,6 +42,16 @@ async function main() {
   }
 
   await writeFile(TARGET, JSON.stringify(data));
+
+  // GitHub Pages caches assets for 10 minutes, so after a deploy a browser can
+  // pair new HTML with a stale app.js and throw on elements that no longer
+  // exist. Stamping the asset URLs each build makes that impossible.
+  const version = Date.parse(data.generatedAt) || Date.now();
+  const indexPath = join(ROOT, 'public/index.html');
+  const html = (await readFile(indexPath, 'utf8'))
+    .replace(/(href="styles\.css)(\?v=\d+)?"/, `$1?v=${version}"`)
+    .replace(/(src="app\.js)(\?v=\d+)?"/, `$1?v=${version}"`);
+  await writeFile(indexPath, html);
   const kb = (JSON.stringify(data).length / 1024).toFixed(0);
   console.log(isPublic
     ? `Public build written (${kb}KB) — portfolio and holdings removed, verified clean`
