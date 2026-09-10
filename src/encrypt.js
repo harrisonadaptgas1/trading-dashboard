@@ -27,7 +27,7 @@ export async function deriveKey(password, salt) {
 const b64 = (buf) => Buffer.from(buf).toString('base64');
 
 async function main() {
-  const password = process.env.DASHBOARD_PASSWORD;
+  const password = process.env.DASHBOARD_PASSWORD?.trim();
   if (!password) throw new Error('DASHBOARD_PASSWORD is not set');
   if (password.length < 10) throw new Error('Use a password of at least 10 characters');
 

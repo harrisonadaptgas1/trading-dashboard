@@ -710,7 +710,7 @@ $('t212-remove')?.addEventListener('click', async () => {
 
 /* ---------- wiring ---------- */
 
-$('gate-form').addEventListener('submit', (e) => { e.preventDefault(); unlock($('password').value); });
+$('gate-form').addEventListener('submit', (e) => { e.preventDefault(); unlock($('password').value.trim()); });
 $('refresh').addEventListener('click', refresh);
 $('scan-btn').addEventListener('click', runScan);
 $('gh-cancel').addEventListener('click', () => { $('gh-setup').hidden = true; status(''); });
