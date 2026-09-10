@@ -97,7 +97,7 @@ const round = (v) => Number(v.toFixed(2));
  * Anchored on the 20-day average (the pullback magnet in an uptrend), floored at the
  * recent low, and widened by ATR so the band reflects how much the stock actually moves.
  */
-function computeEntry(closes, highs, lows) {
+export function computeEntry(closes, highs, lows) {
   const e20 = last(ema(closes, 20));
   const s50 = last(sma(closes, 50));
   const a = last(atr(highs, lows, closes, 14));
@@ -118,19 +118,19 @@ function computeEntry(closes, highs, lows) {
     };
   }
 
-  let low, high, note;
+  let low, high, context;
   if (uptrend && price <= e20) {
     low = Math.max(recentLow, price - a);
     high = price + a * 0.25;
-    note = 'It has already pulled back to its short-term average, so the flagged zone sits around today’s price.';
+    context = 'It has already pulled back to its short-term average.';
   } else if (uptrend) {
     low = Math.max(recentLow, e20 - a * 0.5);
     high = e20 + a * 0.5;
-    note = 'It is trading above its short-term average, so this zone would mean waiting for a dip back toward it.';
+    context = 'It is trading above its short-term average.';
   } else {
     low = price - a * 0.75;
     high = price + a * 0.25;
-    note = 'It is recovering but still below its medium-term average, so this is a narrower zone on a less established setup.';
+    context = 'It is recovering but still below its medium-term average, so this is a less established setup.';
   }
 
   if (low >= high) low = high - a * 0.25;
@@ -138,15 +138,47 @@ function computeEntry(closes, highs, lows) {
   const breaksBelow = Math.min(low - a, recentLow - a * 0.25);
   const inZone = price >= low && price <= high;
 
+  // Exit target. Prefer the recent 20-day high: a level the stock has actually
+  // turned at, rather than a number invented from a multiple. If that sits too
+  // close to be worth the risk taken, fall back to twice the risk instead.
+  const mid = (low + high) / 2;
+  const risk = mid - breaksBelow;
+  let exit = recentHigh;
+  let exitBasis = 'the recent 20-day high, a level it has turned at before';
+  if (risk > 0 && exit - mid < risk) {
+    exit = mid + risk * 2;
+    exitBasis = 'twice the distance to the break level, because the recent high is too close to be worth the risk';
+  }
+  const rewardRisk = risk > 0 ? (exit - mid) / risk : null;
+
+  // Word the note from the computed status, not the branch: a stock above its
+  // 20-day average can still sit inside the band, and saying "wait for a dip"
+  // next to an "in the zone now" badge contradicts itself.
+  // The risk figures above assume entry inside the zone. Buying at today's price
+  // instead gives a different stop distance, so state that separately rather than
+  // letting a zone-based percentage be read as today's risk.
+  const stopFromTodayPct = Number((((price - breaksBelow) / price) * 100).toFixed(1));
+
+  const note = `${context} ${inZone
+    ? 'Today’s price sits inside that zone.'
+    : 'Reaching the zone would mean waiting for a dip.'} The exit level is ${exitBasis}.` +
+    (inZone ? '' : ` Buying at today’s price rather than in the zone would put the stop ${stopFromTodayPct}% away instead.`);
+
   return {
     status: inZone ? 'in-zone' : 'wait',
     low: round(low),
     high: round(high),
-    breaksBelow: round(breaksBelow),
+    exit: round(exit),
+    // The stop loss: below this, the setup we described is no longer true.
+    stopLoss: round(breaksBelow),
     recentHigh: round(recentHigh),
     // How far price would have to fall to reach the top of the zone.
     fallToZonePct: inZone ? 0 : Number((((price - high) / price) * 100).toFixed(1)),
     riskPct: Number((((high - breaksBelow) / high) * 100).toFixed(1)),
+    stopFromTodayPct,
+    // Gain from the middle of the zone to the exit, as a percentage.
+    rewardPct: Number((((exit - mid) / mid) * 100).toFixed(1)),
+    rewardRisk: rewardRisk == null ? null : Number(rewardRisk.toFixed(1)),
     note,
   };
 }

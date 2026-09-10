@@ -8,7 +8,8 @@
     "scan": "node src/scan.js",
     "encrypt": "node src/encrypt.js",
     "build": "node src/scan.js && node src/encrypt.js",
-    "serve": "node scripts/serve.js"
+    "serve": "node scripts/serve.js",
+    "t212": "node scripts/t212-check.js"
   },
   "keywords": [],
   "author": "",

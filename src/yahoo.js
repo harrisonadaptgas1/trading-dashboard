@@ -47,6 +47,11 @@ async function getFundamentals(ticker) {
       earningsQuarterlyGrowth: qs.defaultKeyStatistics?.earningsQuarterlyGrowth ?? null,
       revenueGrowth: qs.financialData?.revenueGrowth ?? null,
       earningsDate: earningsDates.length ? new Date(earningsDates[0]).toISOString() : null,
+      targetMeanPrice: qs.financialData?.targetMeanPrice ?? null,
+      targetLowPrice: qs.financialData?.targetLowPrice ?? null,
+      targetHighPrice: qs.financialData?.targetHighPrice ?? null,
+      numberOfAnalystOpinions: qs.financialData?.numberOfAnalystOpinions ?? null,
+      recommendationKey: qs.financialData?.recommendationKey ?? null,
     };
   } catch (err) {
     console.warn(`  ! Fundamentals unavailable for ${ticker}: ${err.message}`);

@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#0f1115">
+<!-- Added to an iPhone home screen, this opens full screen like an app. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Watchlist">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Watchlist</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -40,20 +45,13 @@
 
   <div id="errors" class="errors" hidden></div>
 
-  <nav class="tabs">
-    <button class="tab active" data-target="long">Long-Term</button>
-    <button class="tab" data-target="swing">Swing-Term</button>
-  </nav>
+  <!-- One scan covers both lists, so the bar sits above the tabs and serves both. -->
+  <div class="scanbar">
+    <button id="scan-btn" class="scan-btn">Run new scan</button>
+    <p class="scan-status" id="scan-status" role="status"></p>
+  </div>
 
-  <section id="long" class="panel"><div id="long-cards"></div></section>
-
-  <section id="swing" class="panel" hidden>
-    <div class="scanbar">
-      <button id="scan-btn" class="scan-btn">Run new scan</button>
-      <p class="scan-status" id="scan-status" role="status"></p>
-    </div>
-
-    <form id="gh-setup" class="gh-setup" hidden>
+  <form id="gh-setup" class="gh-setup" hidden>
       <p class="gh-note">
         A new scan runs on GitHub, so it needs a token with permission to start it.
         Create a <strong>fine-grained personal access token</strong> limited to this one
@@ -71,7 +69,41 @@
       </div>
     </form>
 
+  <nav class="tabs">
+    <button class="tab active" data-target="long">Long-Term</button>
+    <button class="tab" data-target="swing">Swing-Term</button>
+    <button class="tab" data-target="portfolio">Portfolio</button>
+  </nav>
+
+  <section id="long" class="panel"><div id="long-cards"></div></section>
+  <section id="swing" class="panel" hidden>
+    <div id="swing-shortlist"></div>
     <div id="swing-cards"></div>
+  </section>
+  <section id="portfolio" class="panel" hidden>
+    <form id="t212-setup" class="gh-setup" hidden>
+      <p class="gh-note">
+        Connect your Trading 212 account to see your holdings here. In the Trading 212 app:
+        <strong>&#9776; &rarr; Settings &rarr; API (Beta) &rarr; Generate API key</strong>.
+        Tick <strong>portfolio</strong> and <strong>account</strong> only &mdash;
+        <strong>never tick <em>orders</em></strong>, which can place real trades.
+        Trading 212 gives you <strong>two</strong> values, and both are needed.
+        They are stored on this PC only and never leave it.
+      </p>
+      <input type="password" id="t212-key" placeholder="API Key" autocomplete="off">
+      <input type="password" id="t212-secret" placeholder="API Secret Key" autocomplete="off">
+      <div class="gh-buttons">
+        <button type="submit" id="t212-save">Connect</button>
+      </div>
+      <p class="scan-status" id="t212-status" role="status"></p>
+    </form>
+
+    <div id="t212-connected" class="scanbar" hidden>
+      <span class="tag" id="t212-info"></span>
+      <button type="button" id="t212-remove" class="lock">Disconnect</button>
+    </div>
+
+    <div id="portfolio-body"></div>
   </section>
 
   <footer class="foot">

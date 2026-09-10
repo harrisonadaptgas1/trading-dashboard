@@ -9,14 +9,26 @@ criteria on the day. Nothing here predicts what a price will do.
 
 ---
 
-## Running it locally
+## Everyday use: just double-click `start-dashboard.bat`
+
+That starts the local server and opens the dashboard. Leave the black window open
+while you use it. The **Run new scan** button then works directly on this machine —
+about 10 seconds, no GitHub and no token involved.
+
+Your password lives on one line at the top of `start-dashboard.bat`; edit it there
+and re-run the scan to change it. The file is gitignored so it never leaves your PC.
+
+## Running it from a terminal instead
 
 ```bash
 npm install
 npm run scan                              # fetch + score -> public/data/latest.json
 DASHBOARD_PASSWORD=your-password npm run encrypt
-npm run serve                             # http://localhost:4173
+DASHBOARD_PASSWORD=your-password npm run serve   # http://localhost:4173
 ```
+
+The password is needed by `serve` too, because the local **Run new scan** endpoint
+re-encrypts the results after each scan.
 
 Useful during development:
 
@@ -81,7 +93,82 @@ A stock either shows *"price is in the zone now"* or *"would need to fall X% to 
 inside an uptrend, so inventing a level for a falling stock would be dressing up a
 number we have no basis for. On the current watchlist that is 7 of the 20.
 
-### Long-term (10 stocks)
+### Risk level (every stock)
+
+Low / Medium / High / Very high, built only from measurable things — never a
+probability of any outcome:
+
+| Factor | Points |
+|---|---|
+| Daily movement (ATR%) | up to 3 |
+| Priced above sector peers | up to 2 |
+| Earnings within 7 days | 3 (within 21 days: 1) |
+| Stop more than 10% / 15% below today's price | 1 / 2 |
+| Trading below half its usual volume | 1 |
+| Under 120 days of price history | 2 |
+| Scores under 4 | 1 |
+
+0–1 Low · 2–3 Medium · 4–5 High · 6+ Very high. Each card lists the factors that
+applied, so a level is always explainable.
+
+### The "matches every criterion" shortlist
+
+Sits at the top of the Swing tab. A stock appears only if it meets all six:
+
+1. Scores 5.5 or better
+2. Price is inside the entry zone right now
+3. Reward is at least 1.5x the risk
+4. Medium-term trend is up
+5. No earnings inside the next 5 days
+6. Risk level is Low or Medium
+
+Every card also shows its own "meets N of 6" with ticks and crosses.
+
+The checklist counts criteria actually met, which is a fact that can be checked. When
+nothing matches all six, the shortlist says so and names the closest.
+
+### Historical hit rate (the backtest)
+
+`src/backtest.js` walks back through two years of daily bars, finds every day the entry
+rules would have fired, and records whether price reached the exit target or the stop
+loss first. Rules chosen so the result cannot flatter itself:
+
+- Only data up to the signal bar is used — no lookahead.
+- Entry is the close of the signal bar.
+- If one bar touches both stop and target, it counts as a **loss**.
+- Overlapping signals are skipped until the open trade resolves.
+- Still open after 30 trading days = "unresolved", excluded rather than counted as a win.
+
+Each swing card then shows how many times the setup fired, the win/loss split, and the
+**average outcome per setup**: `hitRate × todaysGain − (1 − hitRate) × todaysLoss`.
+
+That last figure is the useful one. Hit rates across the watchlist run 23–65%, mostly
+near a coin flip, so being right often is not where the edge is. A 39% hit rate with a
+2:1 payoff beats a 63% hit rate with a 1:1 payoff.
+
+**This is not a probability of future profit.** It is a record of what happened on past
+setups on that stock, under these rules, in one particular two-year market. It carries no
+guarantee about the next one, and the dashboard says so on every card.
+
+### Analyst targets (long-term cards only)
+
+From Yahoo's `financialData`: average target, the low–high range, how many analysts
+cover it, and the consensus rating. Not shown on swing cards — a 12-month view says
+nothing about a setup measured in days.
+
+**Price targets are always a 12-month convention.** Analysts do not publish varied
+horizons, so the dashboard does not invent one. Instead each card checks the implied
+upside against the stock's own history: over 3, 6 and 12-month windows across two
+years, how often did it actually move that far? The card names the shortest horizon
+where it did so more than half the time, or says plainly that even 12 months has not
+typically got there.
+
+The **spread** is shown as prominently as the average, and flagged when the highest
+target is 40%+ above the lowest. A wide spread means the "target" is the midpoint of
+serious disagreement, not a consensus. On the current watchlist those spreads run from
+41% (V) to 231% (AVGO).
+
+### Long-term (11 stocks)
 
 | Signal | Weight | Notes |
 |---|---|---|
@@ -99,6 +186,55 @@ Any fundamental that is unavailable is scored neutral (5/10) and flagged on the 
 never treated as a failure.
 
 ---
+
+## Portfolio (Trading 212)
+
+Optional third tab showing your real holdings, cross-referenced against the watchlist:
+each position carries its watchlist score, and watchlist cards show a "You hold N" badge
+so a score is read knowing you already own it. Figures come straight from Trading 212;
+there is deliberately no value chart, because their API exposes only a snapshot of
+positions and any curve drawn from it would imply gains you did not make.
+
+**Laptop only, deliberately.** Holdings never go near the public GitHub repo. The key
+is read server-side in `src/scan.js` and never reaches the browser.
+
+### Setting it up
+
+1. In the Trading 212 app: **☰ → Settings → API (Beta) → Generate API key**
+2. Grant **portfolio** and **account** scopes only. **Never grant `orders`** — that scope
+   can place real trades.
+3. Restrict it to your own IP address. Worth doing, and possible precisely because this
+   only ever runs from your laptop.
+4. Open the dashboard, go to the **Portfolio** tab, paste the key and press **Connect**.
+
+The key is verified against Trading 212 before it is saved, so a typo fails immediately
+rather than silently later. It is stored in `secrets.local.json` (gitignored, never sent
+to the browser, never written into the scan output), and **Disconnect** deletes it.
+
+`/api/settings` refuses any request that does not come from this machine.
+
+Setting `T212_API_KEY` in `start-dashboard.bat` still works and takes priority; the
+dashboard then shows the key as env-managed and won't let you edit it from the browser.
+
+Only available on General Invest and Stocks & Shares ISA accounts, not SIPPs.
+
+### Checking the connection
+
+```bash
+node scripts/t212-check.js
+```
+
+Prints field names, types and counts — never balances, quantities or prices — so the
+output is safe to paste to someone for debugging.
+
+### Notes
+
+- Share prices show in each stock's own currency; profit and loss is in your account
+  currency. No FX conversion is invented.
+- Holdings inside a Pie are flagged as such.
+- The API is beta and rate-limited per account. One scan a day is nowhere near the limit.
+- No key, a wrong key, or Trading 212 being down all mean "no portfolio", never a failed
+  scan. The rest of the dashboard carries on.
 
 ## Data sources
 

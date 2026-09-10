@@ -8,8 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { yf, getStockData, mapWithLimit } from './yahoo.js';
 import { getNews } from './news.js';
-import { scoreSwingStock } from './scoreSwing.js';
+import { scoreSwingStock, computeEntry } from './scoreSwing.js';
 import { scoreLongTermStock } from './scoreLongTerm.js';
+import { getPortfolio, fetchInstruments } from './trading212.js';
+import { getT212Credentials } from './secrets.js';
+import { resolveInstrument, getFxRate, loadT212Metadata } from './instruments.js';
+import { assessRisk, buildChecklist } from './risk.js';
+import { runBacktest } from './backtest.js';
+import { buildAnalystView } from './analysts.js';
+import { runHealthCheck } from './healthCheck.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = async (p) => JSON.parse(await readFile(join(ROOT, p), 'utf8'));
@@ -60,9 +67,55 @@ async function collect(entries, config) {
   });
 }
 
-function toCard(data, news, scored, config) {
+function toCard(data, news, scored, config, peerMedianPE) {
   const n = config.chart.sparklineDays;
+
+  const risk = assessRisk({
+    atrPct: scored.metrics.atrPct ?? null,
+    earningsDate: data.fundamentals.earningsDate,
+    sessions: data.series.closes.length,
+    stopFromTodayPct: scored.entry?.stopFromTodayPct ?? null,
+    volumeRatio: scored.metrics.volumeRatio ?? null,
+    score: scored.score,
+    trailingPE: data.fundamentals.trailingPE,
+    peerMedianPE,
+  });
+
+  // How this setup has actually performed on this stock before. Swing only:
+  // long-term holdings have no target-or-stop outcome to measure.
+  const backtest = scored.entry ? runBacktest(data.series, computeEntry) : null;
+
+  // Hit rate alone is misleading: 45% with a 2:1 payoff beats 60% with 1:1.
+  // Combine the measured hit rate with today's actual reward and risk to get the
+  // average outcome per setup, in percent. Still backward-looking, but it is the
+  // one figure that accounts for both being right and being paid.
+  if (backtest?.hitRate != null && scored.entry?.rewardPct != null) {
+    const p = backtest.hitRate;
+    backtest.expectancyPct = Number(
+      (p * scored.entry.rewardPct - (1 - p) * scored.entry.riskPct).toFixed(2)
+    );
+  }
+
+  // The checklist only means anything for swing setups, which have entry levels.
+  const checklist = scored.entry
+    ? buildChecklist({
+        score: scored.score,
+        entry: scored.entry,
+        trendScore: scored.breakdown.trend?.score,
+        earningsDate: data.fundamentals.earningsDate,
+        risk,
+      })
+    : null;
+
+  // Analyst consensus is a long-term signal; swing setups run on days, not a
+  // 12-month view, so it would be noise there.
+  const analysts = scored.entry ? null : buildAnalystView(data.fundamentals, data.price, data.series.closes);
+
   return {
+    risk,
+    checklist,
+    backtest,
+    analysts,
     ticker: data.ticker,
     name: data.name,
     price: Number(data.price.toFixed(2)),
@@ -124,16 +177,66 @@ async function main() {
 
   const longTerm = okLong
     .map(({ data, news }) => toCard(data, news,
-      scoreLongTermStock(data, news, config, medians[data.fundamentals.sector]), config))
+      scoreLongTermStock(data, news, config, medians[data.fundamentals.sector]), config, medians[data.fundamentals.sector]))
     .sort((a, b) => b.score - a.score);
 
   const swingTerm = okSwing
-    .map(({ data, news }) => toCard(data, news, scoreSwingStock(data, news, config), config))
+    .map(({ data, news }) => toCard(data, news, scoreSwingStock(data, news, config), config, medians[data.fundamentals.sector]))
     .sort((a, b) => b.score - a.score);
+
+  // Portfolio is optional: no key means no portfolio, never a failed scan.
+  const t212 = await getT212Credentials();
+  const portfolio = await getPortfolio(t212.key, t212.secret);
+  if (portfolio.available) {
+    await loadT212Metadata(() => fetchInstruments(t212.key, t212.secret));
+    const byTicker = new Map([...longTerm, ...swingTerm].map((s) => [s.ticker, s]));
+
+    // Resolve the real instrument FIRST. Matching on the raw ticker misses
+    // holdings whose T212 ticker is historic — AGC_US_EQ is Grab, so matching
+    // "AGC" against the watchlist would wrongly report it as not held.
+    for (const pos of portfolio.positions) {
+      const info = await resolveInstrument(pos.t212Ticker, pos.ticker);
+      pos.displayTicker = info.displayTicker ?? pos.ticker;
+      pos.fullName = info.name ?? pos.ticker;
+      pos.currency = info.currency ?? (/_US_EQ$/.test(pos.t212Ticker ?? '') ? 'USD' : null);
+      pos.type = info.type ?? null;
+      pos.symbol = info.symbol ?? null;
+
+      if (pos.quantity != null && pos.currentPrice != null) {
+        pos.value = Number((pos.quantity * pos.currentPrice).toFixed(2));
+        const rate = await getFxRate(pos.currency, portfolio.currency);
+        pos.valueAccount = rate == null ? null : Number((pos.value * rate).toFixed(2));
+      }
+
+      // Match on the resolved symbol, falling back to the raw ticker.
+      const match = byTicker.get(pos.displayTicker) ?? byTicker.get(pos.ticker);
+      pos.onWatchlist = Boolean(match);
+      pos.score = match?.score ?? null;
+      pos.category = match ? (longTerm.includes(match) ? 'Long-term' : 'Swing') : null;
+      // Mark the watchlist card too, so a score is read knowing you hold it.
+      if (match) match.held = { quantity: pos.quantity, pplPct: pos.pplPct };
+    }
+
+    // Biggest holdings first: what the money is actually in matters more than
+    // which position happens to be up the most.
+    portfolio.positions.sort((a, b) => (b.valueAccount ?? b.value ?? 0) - (a.valueAccount ?? a.value ?? 0));
+
+    portfolio.health = await runHealthCheck(portfolio, watchlist);
+    if (portfolio.health) {
+      const { flags, notes } = portfolio.health.summary;
+      console.log(`  health check: ${flags} flag(s), ${notes} note(s)`);
+    }
+
+    console.log(`\nTrading 212 (${portfolio.accountType}): ${portfolio.positions.length} positions, ` +
+      `${portfolio.positions.filter((p) => p.onWatchlist).length} on the watchlist`);
+  } else {
+    console.log(`\nTrading 212: ${portfolio.reason}`);
+  }
 
   const output = {
     generatedAt: new Date().toISOString(),
     dataAsOf: longTerm[0]?.asOf ?? swingTerm[0]?.asOf ?? null,
+    portfolio,
     config: { swingWeights: config.swing.weights, longTermWeights: config.longTerm.weights },
     sectorMedianPE: medians,
     longTerm,

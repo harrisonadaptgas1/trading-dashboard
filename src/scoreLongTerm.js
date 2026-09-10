@@ -1,6 +1,6 @@
 // Long-term scoring: is the multi-year trend intact, is the business growing,
 // and is the price sane relative to peers?
-import { last, sma } from './indicators.js';
+import { last, sma, atr } from './indicators.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const pct = (v) => `${(v * 100).toFixed(0)}%`;
@@ -81,6 +81,12 @@ function scoreValuation(f, peerMedianPE) {
 export function scoreLongTermStock(data, news, config, peerMedianPE) {
   const { weights } = config.longTerm;
   const f = data.fundamentals;
+  const { closes, highs, lows } = data.series;
+
+  // Volatility is not part of the long-term score, but the risk assessment needs
+  // it, and without it every long-term stock came out as "Low risk".
+  const atrSeries = atr(highs, lows, closes, 14);
+  const atrPct = atrSeries.length ? (last(atrSeries) / last(closes)) * 100 : null;
 
   const parts = {
     trend: scoreTrend(data.series.closes),
@@ -104,7 +110,7 @@ export function scoreLongTermStock(data, news, config, peerMedianPE) {
       Object.entries(parts).map(([k, v]) => [k, { score: Number(v.score.toFixed(1)), weight: weights[k], note: v.note }])
     ),
     warnings,
-    metrics: { trailingPE: f.trailingPE, forwardPE: f.forwardPE, earningsGrowth: f.earningsGrowth, revenueGrowth: f.revenueGrowth },
+    metrics: { trailingPE: f.trailingPE, forwardPE: f.forwardPE, earningsGrowth: f.earningsGrowth, revenueGrowth: f.revenueGrowth, atrPct },
   };
 }
 

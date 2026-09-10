@@ -1,3 +1,11 @@
 node_modules/
 public/data/latest.json
 .env
+start-dashboard.bat
+secrets.local.json
+cache/
+
+# Scan output is generated. The workflow force-adds its own PUBLIC build;
+# a local build contains portfolio data and must never be committed.
+public/data/latest.enc.json
+config/watchlist.backup-*.json

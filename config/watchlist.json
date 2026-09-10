@@ -1,36 +1,90 @@
 {
   "long_term": [
-    {"ticker": "AAPL", "name": "Apple"},
-    {"ticker": "MSFT", "name": "Microsoft"},
-    {"ticker": "NVDA", "name": "Nvidia"},
-    {"ticker": "AMZN", "name": "Amazon"},
-    {"ticker": "GOOGL", "name": "Alphabet"},
-    {"ticker": "META", "name": "Meta"},
-    {"ticker": "V", "name": "Visa"},
-    {"ticker": "AVGO", "name": "Broadcom"},
-    {"ticker": "COST", "name": "Costco"},
-    {"ticker": "ASML", "name": "ASML"}
+    {
+      "ticker": "V",
+      "name": "Visa"
+    },
+    {
+      "ticker": "COST",
+      "name": "Costco"
+    },
+    {
+      "ticker": "ASML",
+      "name": "ASML"
+    },
+    {
+      "ticker": "GRAB",
+      "name": "Grab Holdings"
+    }
   ],
   "swing_term": [
-    {"ticker": "TSLA", "name": "Tesla"},
-    {"ticker": "AMD", "name": "AMD"},
-    {"ticker": "PLTR", "name": "Palantir"},
-    {"ticker": "COIN", "name": "Coinbase"},
-    {"ticker": "SMCI", "name": "Super Micro Computer"},
-    {"ticker": "HOOD", "name": "Robinhood"},
-    {"ticker": "MSTR", "name": "MicroStrategy"},
-    {"ticker": "SHOP", "name": "Shopify"},
-    {"ticker": "UBER", "name": "Uber"},
-    {"ticker": "ABNB", "name": "Airbnb"},
-    {"ticker": "ROKU", "name": "Roku"},
-    {"ticker": "CVNA", "name": "Carvana"},
-    {"ticker": "SOFI", "name": "SoFi"},
-    {"ticker": "DKNG", "name": "DraftKings"},
-    {"ticker": "RIVN", "name": "Rivian"},
-    {"ticker": "PLUG", "name": "Plug Power"},
-    {"ticker": "CRWD", "name": "CrowdStrike"},
-    {"ticker": "SNOW", "name": "Snowflake"},
-    {"ticker": "NET", "name": "Cloudflare"},
-    {"ticker": "AFRM", "name": "Affirm"}
+    {
+      "ticker": "AMD",
+      "name": "AMD"
+    },
+    {
+      "ticker": "PLTR",
+      "name": "Palantir"
+    },
+    {
+      "ticker": "COIN",
+      "name": "Coinbase"
+    },
+    {
+      "ticker": "SMCI",
+      "name": "Super Micro Computer"
+    },
+    {
+      "ticker": "HOOD",
+      "name": "Robinhood"
+    },
+    {
+      "ticker": "SHOP",
+      "name": "Shopify"
+    },
+    {
+      "ticker": "ABNB",
+      "name": "Airbnb"
+    },
+    {
+      "ticker": "ROKU",
+      "name": "Roku"
+    },
+    {
+      "ticker": "CVNA",
+      "name": "Carvana"
+    },
+    {
+      "ticker": "SOFI",
+      "name": "SoFi"
+    },
+    {
+      "ticker": "DKNG",
+      "name": "DraftKings"
+    },
+    {
+      "ticker": "RIVN",
+      "name": "Rivian"
+    },
+    {
+      "ticker": "PLUG",
+      "name": "Plug Power"
+    },
+    {
+      "ticker": "CRWD",
+      "name": "CrowdStrike"
+    },
+    {
+      "ticker": "SNOW",
+      "name": "Snowflake"
+    },
+    {
+      "ticker": "NET",
+      "name": "Cloudflare"
+    },
+    {
+      "ticker": "AFRM",
+      "name": "Affirm"
+    }
   ]
 }

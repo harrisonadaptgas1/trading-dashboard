@@ -31,7 +31,20 @@ async function main() {
   if (!password) throw new Error('DASHBOARD_PASSWORD is not set');
   if (password.length < 10) throw new Error('Use a password of at least 10 characters');
 
-  const plaintext = await readFile(join(ROOT, 'public/data/latest.json'), 'utf8');
+  let plaintext = await readFile(join(ROOT, 'public/data/latest.json'), 'utf8');
+
+  // The published build goes to a public repository and may be shared, so it
+  // carries the watchlist and scores only. Holdings, balances and anything
+  // derived from them never leave this machine.
+  const publicBuild = process.argv.includes('--public') || process.env.PUBLISH_MODE === 'public';
+  if (publicBuild) {
+    const data = JSON.parse(plaintext);
+    delete data.portfolio;
+    for (const s of [...(data.longTerm ?? []), ...(data.swingTerm ?? [])]) delete s.held;
+    data.publicBuild = true;
+    plaintext = JSON.stringify(data);
+    console.log('Public build: portfolio, balances and holding badges removed');
+  }
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(password, salt);
