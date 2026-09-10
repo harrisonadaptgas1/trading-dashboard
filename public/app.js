@@ -11,6 +11,44 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
 const fmtWhen = (d) => new Date(d).toLocaleString('en-GB',
   { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+/**
+ * The scan times from .github/workflows/daily-scan.yml, in UTC minutes past
+ * midnight. GitHub cron is always UTC, so these are fixed points that shift
+ * by an hour in UK terms when the clocks change — exactly as the runs do.
+ */
+const SCAN_SLOTS_UTC = [
+  5 * 60,                                             // 05:00 overnight
+  ...Array.from({ length: 12 }, (_, i) => 13 * 60 + 30 + i * 30), // 13:30 to 19:00
+];
+
+/** Next scheduled scan after `from`, skipping weekends. Returns a Date. */
+function nextScanAfter(from = new Date()) {
+  for (let dayOffset = 0; dayOffset < 5; dayOffset++) {
+    const day = new Date(from);
+    day.setUTCDate(day.getUTCDate() + dayOffset);
+    const weekday = day.getUTCDay();
+    if (weekday === 0 || weekday === 6) continue; // no runs at weekends
+
+    for (const slot of SCAN_SLOTS_UTC) {
+      const candidate = new Date(Date.UTC(
+        day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(),
+        Math.floor(slot / 60), slot % 60, 0, 0
+      ));
+      if (candidate > from) return candidate;
+    }
+  }
+  return null;
+}
+
+/** "in 12 minutes", "in 2 hours" — a sense of how fresh the next one is. */
+function untilText(date) {
+  const mins = Math.round((date - Date.now()) / 60000);
+  if (mins <= 1) return 'any moment';
+  if (mins < 60) return `in ${mins} minutes`;
+  const hrs = Math.round(mins / 60);
+  return `in about ${hrs} hour${hrs === 1 ? '' : 's'}`;
+}
+
 let current = null; // last loaded payload, so Refresh can compare
 
 const fetchPayload = () => fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' })
@@ -401,6 +439,28 @@ function portfolioHtml(p) {
       profit or loss are converted to ${esc(ccy || 'your account currency')}.</p>`;
 }
 
+/**
+ * Last and next scan. The next one is only meaningful on the published build,
+ * which runs to a schedule; locally scans happen when you press the button.
+ */
+function renderStamp(data) {
+  const rows = [
+    `<span class="stamp-label">Last scan</span> ${esc(fmtWhen(data.generatedAt))}` +
+      (data.dataAsOf ? ` <span class="stamp-dim">· prices to ${esc(data.dataAsOf)}</span>` : ''),
+  ];
+
+  if (data.publicBuild) {
+    const next = nextScanAfter();
+    rows.push(next
+      ? `<span class="stamp-label">Next scan</span> ${esc(fmtWhen(next))} <span class="stamp-dim">· ${esc(untilText(next))}</span>`
+      : '<span class="stamp-label">Next scan</span> not scheduled');
+  } else {
+    rows.push('<span class="stamp-label">Next scan</span> <span class="stamp-dim">when you press Run new scan</span>');
+  }
+
+  $('stamp').innerHTML = rows.map((r) => `<div>${r}</div>`).join('');
+}
+
 function render(data) {
   current = data;
   $('long-cards').innerHTML = data.longTerm.map(cardHtml).join('') || '<p class="no-news">No long-term results.</p>';
@@ -408,8 +468,7 @@ function render(data) {
   $('swing-cards').innerHTML = data.swingTerm.map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>';
   $('portfolio-body').innerHTML = portfolioHtml(data.portfolio);
 
-  $('stamp').textContent = `Scanned ${fmtWhen(data.generatedAt)}` +
-    (data.dataAsOf ? ` · prices to ${data.dataAsOf}` : '');
+  renderStamp(data);
 
   const box = $('errors');
   if (data.errors?.length) {
@@ -451,6 +510,9 @@ async function refresh() {
   btn.textContent = '…';
   try {
     const data = await fetchPayload();
+
+// A page left open should not keep claiming the next scan is in 30 minutes.
+setInterval(() => { if (current) renderStamp(current); }, 60000);
     if (current && data.generatedAt === current.generatedAt) {
       btn.textContent = 'No change';
     } else {
