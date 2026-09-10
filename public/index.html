@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0f1115">
+<title>Watchlist</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="gate" class="gate">
+  <form id="gate-form" class="gate-box" autocomplete="on">
+    <h1>Watchlist</h1>
+    <p class="gate-sub" id="gate-sub">Enter your password to decrypt today&rsquo;s scan.</p>
+    <input type="password" id="password" name="password" placeholder="Password"
+           autocomplete="current-password" required aria-label="Password">
+    <button type="submit" id="unlock">Unlock</button>
+    <p class="gate-error" id="gate-error" role="alert" hidden></p>
+  </form>
+</div>
+
+<main id="app" hidden>
+  <header class="head">
+    <div>
+      <h1>Watchlist</h1>
+      <p class="stamp" id="stamp"></p>
+    </div>
+    <div class="head-actions">
+      <button id="refresh" class="lock" title="Re-check for a newer scan">Refresh</button>
+      <button id="lock" class="lock" title="Lock">Lock</button>
+    </div>
+  </header>
+
+  <p class="disclaimer">
+    A rules-based screening tool. Scores show how each stock matches the criteria we set,
+    nothing more. Not advice, and no outcome is predictable.
+  </p>
+
+  <div id="errors" class="errors" hidden></div>
+
+  <nav class="tabs">
+    <button class="tab active" data-target="long">Long-Term</button>
+    <button class="tab" data-target="swing">Swing-Term</button>
+  </nav>
+
+  <section id="long" class="panel"><div id="long-cards"></div></section>
+
+  <section id="swing" class="panel" hidden>
+    <div class="scanbar">
+      <button id="scan-btn" class="scan-btn">Run new scan</button>
+      <p class="scan-status" id="scan-status" role="status"></p>
+    </div>
+
+    <form id="gh-setup" class="gh-setup" hidden>
+      <p class="gh-note">
+        A new scan runs on GitHub, so it needs a token with permission to start it.
+        Create a <strong>fine-grained personal access token</strong> limited to this one
+        repository, with <strong>Actions: Read and write</strong> and nothing else.
+        It is stored only on this device and never goes into the repository.
+      </p>
+      <a class="gh-link" href="https://github.com/settings/personal-access-tokens/new"
+         target="_blank" rel="noopener noreferrer">Create a token on GitHub &rarr;</a>
+      <input type="text" id="gh-owner" placeholder="GitHub username" autocomplete="off" spellcheck="false">
+      <input type="text" id="gh-repo" placeholder="Repository name" autocomplete="off" spellcheck="false">
+      <input type="password" id="gh-token" placeholder="github_pat_..." autocomplete="off">
+      <div class="gh-buttons">
+        <button type="submit">Save and scan</button>
+        <button type="button" id="gh-cancel" class="ghost">Cancel</button>
+      </div>
+    </form>
+
+    <div id="swing-cards"></div>
+  </section>
+
+  <footer class="foot">
+    <p>Price and fundamentals from Yahoo Finance. Headlines from Yahoo Finance and Google News.
+       Sentiment is estimated automatically from headline wording and is often wrong on nuance.</p>
+  </footer>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+name: Daily scan
+
+on:
+  schedule:
+    # 05:00 UTC = 06:00 UK in summer (BST), 05:00 UK in winter (GMT).
+    # Either way it lands before the working day, using the previous US close.
+    # GitHub may start scheduled runs 5-20 minutes late at busy times.
+    - cron: '0 5 * * 1-5'
+  workflow_dispatch: {}  # lets you run it by hand from the Actions tab
+
+# Least privilege: write the committed data file, publish Pages, nothing else.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Never let two scans publish at once.
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scan watchlist
+        run: npm run scan
+
+      - name: Encrypt results
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: node src/encrypt.js
+
+      # Committing daily also keeps the repo active, which stops GitHub
+      # auto-disabling scheduled workflows after 60 days of inactivity.
+      - name: Commit encrypted data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/latest.enc.json
+          if git diff --staged --quiet; then
+            echo "No change in scan output"
+          else
+            git commit -m "Daily scan $(date -u +'%Y-%m-%d')"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

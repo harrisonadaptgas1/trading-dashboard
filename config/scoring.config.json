@@ -1,0 +1,21 @@
+{
+  "_comment": "Tune these weights and re-run the scan. Swing weights must total 100. ATR thresholds are absolute daily-swing percentages: on the current watchlist the median is ~5%, so 6 flags the genuinely jumpy names.",
+  "swing": {
+    "weights": { "rsi": 25, "trend": 20, "volume": 20, "momentum": 20, "news": 15 },
+    "modifiers": {
+      "earningsWithinDays": 5,
+      "earningsMultiplier": 0.85,
+      "highVolatilityAtrPct": 6,
+      "highVolatilityMultiplier": 0.9,
+      "lowVolatilityAtrPct": 2,
+      "lowVolatilityMultiplier": 0.95,
+      "minSessions": 60,
+      "thinDataCap": 5
+    }
+  },
+  "longTerm": {
+    "weights": { "trend": 40, "earningsGrowth": 25, "revenueGrowth": 20, "valuation": 15 }
+  },
+  "news": { "lookbackHours": 48, "maxHeadlines": 8, "displayHeadlines": 2 },
+  "chart": { "sparklineDays": 60 }
+}
