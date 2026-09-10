@@ -2,14 +2,16 @@ name: Scan
 
 on:
   schedule:
-    # Every 30 minutes while US markets are open. 13:00-21:00 UTC covers
-    # 09:30-16:00 New York in both BST and GMT, plus a little either side.
-    # Outside those hours prices do not move, so scanning would fetch the same
-    # close over and over and burn through Yahoo's tolerance for no reason.
-    - cron: '*/30 13-21 * * 1-5'
+    # Every 30 minutes, 14:30 to 20:00 UK, Monday to Friday.
+    #
+    # GitHub cron is always UTC and does not follow British Summer Time, so
+    # these are written for BST (UTC+1). Between late October and late March
+    # the whole window lands an hour earlier in UK time, 13:30-19:00.
+    - cron: '30 13 * * 1-5'       # 14:30 UK
+    - cron: '0,30 14-18 * * 1-5'  # 15:00 - 19:30 UK
+    - cron: '0 19 * * 1-5'        # 20:00 UK
     # One overnight run so the morning view is ready before the working day.
-    # 05:00 UTC = 06:00 UK in summer, 05:00 in winter.
-    - cron: '0 5 * * 1-5'
+    - cron: '0 5 * * 1-5'         # 06:00 UK
   workflow_dispatch: {}  # lets you run it by hand from the Actions tab
 
 # Least privilege: write the committed data file, publish Pages, nothing else.
