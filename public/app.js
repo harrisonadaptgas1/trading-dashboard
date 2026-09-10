@@ -484,7 +484,8 @@ function render(data) {
     document.querySelector('.tab[data-target="portfolio"]')?.remove();
     $('portfolio').hidden = true;
     $('scan-btn').hidden = true;
-    $('scan-status').textContent = 'Updates automatically each weekday morning.';
+    // The exact next time is in the header, so this only needs the cadence.
+    $('scan-status').textContent = 'Updates every 30 minutes while US markets are open.';
   }
 
   $('app').hidden = false;
