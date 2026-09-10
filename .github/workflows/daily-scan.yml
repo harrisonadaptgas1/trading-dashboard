@@ -1,10 +1,14 @@
-name: Daily scan
+name: Scan
 
 on:
   schedule:
-    # 05:00 UTC = 06:00 UK in summer (BST), 05:00 UK in winter (GMT).
-    # Either way it lands before the working day, using the previous US close.
-    # GitHub may start scheduled runs 5-20 minutes late at busy times.
+    # Every 30 minutes while US markets are open. 13:00-21:00 UTC covers
+    # 09:30-16:00 New York in both BST and GMT, plus a little either side.
+    # Outside those hours prices do not move, so scanning would fetch the same
+    # close over and over and burn through Yahoo's tolerance for no reason.
+    - cron: '*/30 13-21 * * 1-5'
+    # One overnight run so the morning view is ready before the working day.
+    # 05:00 UTC = 06:00 UK in summer, 05:00 in winter.
     - cron: '0 5 * * 1-5'
   workflow_dispatch: {}  # lets you run it by hand from the Actions tab
 
@@ -38,9 +42,13 @@ jobs:
       - name: Build the public site data
         run: node src/publish.js --public
 
-      # Committing daily also keeps the repo active, which stops GitHub
-      # auto-disabling scheduled workflows after 60 days of inactivity.
-      - name: Commit encrypted data
+      # Pages deploys from the uploaded artifact, so committing is not needed to
+      # publish. It runs once a day only, because 18 commits a day of a 66KB file
+      # would bloat the repository for no benefit — and because a commit keeps
+      # the repo active, which stops GitHub auto-disabling scheduled workflows
+      # after 60 days of inactivity.
+      - name: Commit the day's data
+        if: github.event.schedule == '0 5 * * 1-5' || github.event_name == 'workflow_dispatch'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -48,7 +56,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No change in scan output"
           else
-            git commit -m "Daily scan $(date -u +'%Y-%m-%d')"
+            git commit -m "Scan $(date -u +'%Y-%m-%d')"
             git push
           fi
 

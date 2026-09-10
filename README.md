@@ -274,9 +274,15 @@ and any title listing four or more tickers is dropped.
 
 ## Scheduling
 
-`.github/workflows/daily-scan.yml` runs at **05:00 UTC, Monday to Friday** — 06:00 UK in
-summer, 05:00 in winter. Every stock is US-listed, so this uses the previous US close and
-is ready before the working day.
+`.github/workflows/daily-scan.yml` runs **every 30 minutes while US markets are open**
+(13:00-21:00 UTC, Mon-Fri), plus once at 05:00 UTC so the morning view is ready.
+Outside market hours prices do not move, so scanning then would fetch the same
+close repeatedly for nothing.
+
+That is 19 runs a weekday, about 13 minutes of compute. Free: public repositories
+get unlimited Actions minutes. Only the 05:00 run commits its output — 19 commits
+a day of a 66KB file would bloat the repository, and Pages deploys from the
+uploaded artifact rather than from the commit.
 
 GitHub can start scheduled runs 5–20 minutes late at busy times. Scheduled workflows are
 also auto-disabled after 60 days of repository inactivity, which the daily commit prevents.
