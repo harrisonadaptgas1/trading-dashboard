@@ -13,6 +13,14 @@ on:
     # One overnight run so the morning view is ready before the working day.
     - cron: '0 5 * * 1-5'         # 06:00 UK
   workflow_dispatch: {}  # lets you run it by hand from the Actions tab
+  # A code change should reach the live site straight away rather than waiting
+  # for the next scheduled slot. Data-only commits are ignored so the workflow
+  # cannot trigger itself; the commit step below is already scheduled-runs-only.
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'public/data/**'
+      - 'README.md'
 
 # Least privilege: write the committed data file, publish Pages, nothing else.
 permissions:
