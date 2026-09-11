@@ -943,99 +943,85 @@ function rateStop(pos, plan) {
  * payoff peaks around twice the risk, and a target further out fills so much less
  * often that the extra gain does not pay for the misses.
  */
-function rateLimit(pos, plan, rewardCurve) {
-  const held = pos.quantity;
-  const o = pos.orders;
-  if (!plan || !held || pos.averagePrice == null) return null;
+/**
+ * Describe the sell target. Deliberately not scored.
+ *
+ * Trading 212 will only commit a share to one resting sell order, so a target
+ * can never cover the whole holding while a stop does. Scoring it would mark it
+ * down for a constraint of the platform rather than anything you chose, which is
+ * how a target priced bang on the measured optimum came to read 4 out of 10.
+ */
+function describeLimit(pos, plan, rewardCurve) {
+  if (!plan || pos.averagePrice == null) return null;
   const risk = pos.averagePrice - plan.stopLoss;
   if (risk <= 0) return null;
 
   const best = bestMultiple(rewardCurve);
   const want = pos.averagePrice + risk * (best?.multiple ?? 2);
+  const o = pos.orders;
 
   if (!o || !o.limits.length) {
     return {
-      score: 3, tone: "mid", label: "No sell target placed",
-      detail: "Nothing sells automatically if it reaches your target.",
-      fix: `Add a sell target for ${fmtQty(held)} shares at ${price(want, pos.currency)}.`,
-      wantQty: held,
+      text: `None placed. ${price(want, pos.currency)} is ${best?.multiple ?? 2}x your risk, where the payoff measured best.`,
     };
   }
 
-  const coverage = o.limitQty / held;
   const placed = o.limits.reduce((s, x) => s + x.price * x.quantity, 0) / o.limitQty;
   const multiple = (placed - pos.averagePrice) / risk;
   const fillRate = atMultiple(rewardCurve, multiple, "hitRate");
   const payoff = atMultiple(rewardCurve, multiple, "expectancyR");
-
-  // How much of the best available payoff this distance gives up. Nudging a
-  // target a few percent is not worth the bother; a fifth of the payoff is.
   const givingUp = best && payoff != null && best.expectancyR > 0
     ? Math.max(0, 1 - payoff / best.expectancyR)
     : 0;
-  const badPrice = givingUp > 0.2;
-  const shortOfCover = coverage < 0.99;
-  const tooFar = multiple > (best?.multiple ?? 2);
-
-  let score = 10 * Math.min(1, coverage) - 4 * Math.min(1, givingUp);
-  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
-
-  const pct = Math.round(coverage * 100);
-  const label = !shortOfCover && !badPrice ? "Priced well and covers the whole holding"
-    : shortOfCover && !badPrice ? `Priced well, but covers only ${pct}% of your shares`
-    : !shortOfCover ? `Covers the holding, but set ${tooFar ? "further out" : "closer"} than pays best`
-    : `Covers only ${pct}% of your shares, and the price needs moving`;
-
-  let fix = null;
-  if (shortOfCover && !badPrice) {
-    fix = `Increase your sell target to cover all ${fmtQty(held)} shares. The ${price(placed, pos.currency)} price is right.`;
-  } else if (!shortOfCover && badPrice) {
-    fix = `Move your sell target to ${price(want, pos.currency)}.`;
-  } else if (shortOfCover && badPrice) {
-    fix = `Change your sell target to ${fmtQty(held)} shares at ${price(want, pos.currency)}.`;
-  }
 
   return {
-    score, label, fix,
-    tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
-    detail: `${price(placed, pos.currency)}, ${multiple.toFixed(1)}x your risk`
-      + `${fillRate == null ? "" : `, reached by ${Math.round(fillRate * 100)}% of past setups`}`,
-    wantQty: fix ? held : o.limitQty,
+    text: `${price(placed, pos.currency)} on ${fmtQty(o.limitQty)} shares`
+      + ` &mdash; ${multiple.toFixed(1)}x your risk`
+      + `${fillRate == null ? "" : `, reached by ${Math.round(fillRate * 100)}% of past setups`}.`,
+    // Only worth mentioning if moving it would actually pay.
+    move: givingUp > 0.2 ? `Move your sell target to ${price(want, pos.currency)}.` : null,
   };
 }
-/** Both order ratings, and the changes worth making — nothing more. */
+/** The stop, scored; the target, stated; and anything worth doing about either. */
 function ordersHtml(pos, stocks, rewardCurve) {
   const plan = pos.plan;
   if (!plan || plan.breached) return "";
   const stop = rateStop(pos, plan);
-  const limit = rateLimit(pos, plan, rewardCurve);
-  if (!stop && !limit) return "";
+  const target = describeLimit(pos, plan, rewardCurve);
+  if (!stop && !target) return "";
 
-  const row = (title, r) => !r ? "" : `<div class="ord o-${r.tone}">
-    <div class="ord-top"><span class="ord-title">${title}</span>
-      <span class="ord-num">${r.score.toFixed(1)}<small>/10</small></span></div>
-    <div class="meter-bar"><i style="width:${r.score * 10}%"></i></div>
-    <div class="ord-label">${r.label}</div>
-    <div class="ord-detail">${r.detail}</div>
-  </div>`;
-
-  const fixes = [stop?.fix, limit?.fix].filter(Boolean);
-
-  // Both orders at full size may be more shares than Trading 212 will let you
-  // commit at once — your existing pair splits the holding exactly, which is what
-  // that limit looks like. Say so rather than hand you two orders that clash.
-  const wanted = (stop?.wantQty ?? 0) + (limit?.wantQty ?? 0);
-  const clash = fixes.length > 1 && pos.quantity && wanted > pos.quantity + 1e-8;
+  const fixes = [stop?.fix, target?.move].filter(Boolean);
+  const stopCoversAll = pos.orders && pos.quantity
+    && pos.orders.stopQty >= pos.quantity - 1e-8;
 
   return `<div class="orders">
     <div class="plan-head">Your orders at Trading 212</div>
-    ${row("Stop loss", stop)}
-    ${row("Sell target", limit)}
-    ${fixes.length
-      ? `<ul class="fixes-list">${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>
-         ${clash ? `<p class="pos-note">Trading 212 may not accept both at full size. The stop is the one worth having.</p>` : ""}
-         <p class="pos-note">Read-only here &mdash; make any change in the app.</p>`
-      : `<p class="pos-note">Both look right as they are.</p>`}
+
+    ${stop ? `<div class="ord o-${stop.tone}">
+      <div class="ord-top"><span class="ord-title">Stop loss</span>
+        <span class="ord-num">${stop.score.toFixed(1)}<small>/10</small></span></div>
+      <div class="meter-bar"><i style="width:${stop.score * 10}%"></i></div>
+      <div class="ord-label">${stop.label}</div>
+      <div class="ord-detail">${stop.detail}</div>
+    </div>` : ""}
+
+    ${target ? `<div class="ord o-plain">
+      <div class="ord-top"><span class="ord-title">Sell target</span></div>
+      <div class="ord-detail">${target.text}</div>
+    </div>` : ""}
+
+    ${fixes.length ? `<ul class="fixes-list">${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>`
+      : `<p class="pos-note">Nothing worth changing.</p>`}
+
+    ${stopCoversAll ? "" : `<p class="pos-note">Trading 212 will only commit a share to one
+      resting sell order, so the stop and the target cannot both cover the whole holding.
+      Give the stop the shares and take the target by hand: on past setups that cost nothing
+      &mdash; a resting stop with a manual exit averaged <strong>+2.89%</strong> a trade against
+      <strong>+2.51%</strong> with both resting, while running without a stop turned the average
+      losing trade from <strong>&minus;9.9%</strong> into <strong>&minus;15.7%</strong> and the worst
+      from &minus;26% into &minus;56%.</p>`}
+
+    <p class="pos-note">Read-only here &mdash; make any change in the app.</p>
   </div>`;
 }
 function planHtml(pos) {

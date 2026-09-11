@@ -557,3 +557,7 @@ details.hc[open] > summary::before { content: "▾ "; }
 
 .fixes-list { margin: 12px 0 0; padding-left: 18px; }
 .fixes-list li { font-size: 0.86rem; line-height: 1.5; margin-bottom: 5px; }
+
+/* A stated order rather than a scored one: no bar, no colour claim. */
+.ord.o-plain { border-left-color: var(--line); }
+.ord.o-plain .ord-detail { color: var(--text); font-size: 0.82rem; margin-top: 4px; }
