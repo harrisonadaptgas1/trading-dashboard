@@ -2,7 +2,9 @@
 
 // Loads the scan output and renders it. There is no login: the published build
 // carries only market data and scores, and the local build never leaves this PC.
-const DATA_URL = 'data/site.json';
+// Locally the server has site.local.json (with your portfolio); the published
+// site only has site.json. Try the local one first and fall back.
+const DATA_URLS = ['data/site.local.json', 'data/site.json'];
 const GH_KEY = 'watchlist-gh';
 
 const $ = (id) => document.getElementById(id);
@@ -78,8 +80,16 @@ function untilText(date) {
 
 let current = null; // last loaded payload, so Refresh can compare
 
-const fetchPayload = () => fetch(`${DATA_URL}?t=${Date.now()}`, { cache: 'no-store' })
-  .then((r) => { if (!r.ok) throw new Error(`Could not load data (HTTP ${r.status})`); return r.json(); });
+/** Local build first, published build as the fallback. */
+async function fetchPayload() {
+  let lastStatus = 0;
+  for (const url of DATA_URLS) {
+    const res = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) return res.json();
+    lastStatus = res.status;
+  }
+  throw new Error(`Could not load data (HTTP ${lastStatus})`);
+}
 
 /* ---------- rendering ---------- */
 

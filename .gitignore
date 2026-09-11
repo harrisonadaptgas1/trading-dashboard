@@ -9,3 +9,4 @@ cache/
 # a local build contains portfolio data and must never be committed.
 public/data/site.json
 config/watchlist.backup-*.json
+public/data/site.local.json

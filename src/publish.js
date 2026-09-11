@@ -13,7 +13,10 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = join(ROOT, 'public/data/latest.json');
-const TARGET = join(ROOT, 'public/data/site.json');
+// The published build keeps the tracked name; the local one is gitignored, so
+// the two can never overwrite each other or conflict on a pull.
+const TARGET_PUBLIC = join(ROOT, 'public/data/site.json');
+const TARGET_LOCAL = join(ROOT, 'public/data/site.local.json');
 
 /** Anything that describes what you own, rather than what the market is doing. */
 function stripPersonal(data) {
@@ -41,22 +44,29 @@ async function main() {
     }
   }
 
-  await writeFile(TARGET, JSON.stringify(data));
+  await writeFile(isPublic ? TARGET_PUBLIC : TARGET_LOCAL, JSON.stringify(data));
 
   // GitHub Pages caches assets for 10 minutes, so after a deploy a browser can
   // pair new HTML with a stale app.js and throw on elements that no longer
-  // exist. Stamping the asset URLs each build makes that impossible.
-  const version = Date.parse(data.generatedAt) || Date.now();
-  const indexPath = join(ROOT, 'public/index.html');
-  const html = (await readFile(indexPath, 'utf8'))
-    .replace(/(href="styles\.css)(\?v=\d+)?"/, `$1?v=${version}"`)
-    .replace(/(src="app\.js)(\?v=\d+)?"/, `$1?v=${version}"`);
-  await writeFile(indexPath, html);
+  // exist. Stamping the asset URLs makes that impossible.
+  //
+  // Only on the public build: the local server sends Cache-Control: no-store,
+  // so it has no such problem — and stamping locally too meant every local
+  // build and every workflow run wrote a different version into index.html,
+  // which conflicted on every single pull.
+  if (isPublic) {
+    const version = Date.parse(data.generatedAt) || Date.now();
+    const indexPath = join(ROOT, 'public/index.html');
+    const html = (await readFile(indexPath, 'utf8'))
+      .replace(/(href="styles\.css)(\?v=\d+)?"/, `$1?v=${version}"`)
+      .replace(/(src="app\.js)(\?v=\d+)?"/, `$1?v=${version}"`);
+    await writeFile(indexPath, html);
+  }
   const kb = (JSON.stringify(data).length / 1024).toFixed(0);
   console.log(isPublic
     ? `Public build written (${kb}KB) — portfolio and holdings removed, verified clean`
     : `Local build written (${kb}KB) — includes your portfolio`);
-  console.log('  -> public/data/site.json');
+  console.log('  -> public/data/' + (isPublic ? 'site.json' : 'site.local.json'));
 }
 
 main().catch((err) => {
