@@ -883,53 +883,46 @@ function rateStop(pos, plan) {
   const held = pos.quantity;
   const o = pos.orders;
   if (!plan || !held) return null;
-  const suggestions = [];
+  const want = price(plan.stopLoss, pos.currency);
 
   if (!o || !o.stops.length) {
     return {
       score: 0, tone: "bad", label: "No stop placed",
-      detail: "Trading 212 has no stop order for this holding, so nothing sells automatically if it falls.",
-      suggestions: [`Place a stop for all ${fmtQty(held)} shares at ${price(plan.stopLoss, pos.currency)}.`],
+      detail: "Nothing sells automatically if this falls.",
+      fix: `Add a stop loss for ${fmtQty(held)} shares at ${want}.`,
+      wantQty: held,
     };
   }
 
   const coverage = o.stopQty / held;
-  // One stop is the normal case; average the prices if there are several.
   const placed = o.stops.reduce((s, x) => s + x.price * x.quantity, 0) / o.stopQty;
   const drift = (placed - plan.stopLoss) / plan.stopLoss;
 
   let score = 10 * Math.min(1, coverage);
-  if (coverage < 0.999) {
-    suggestions.push(`Your stop covers ${fmtQty(o.stopQty)} of ${fmtQty(held)} shares`
-      + ` (${Math.round(coverage * 100)}%). The other ${fmtQty(held - o.stopQty)} would keep falling with nothing under them.`);
-  }
+  // Above the break level a stop sits inside ordinary daily movement; well below
+  // it you lose more than the setup asks. Inside that band, leave it alone.
+  const misplaced = drift > 0.015 || drift < -0.04;
+  if (drift > 0.015) score -= 2.5;
+  else if (drift < -0.04) score -= 1.5;
 
-  // Above the break level the stop sits inside ordinary daily movement; well
-  // below it you lose more than the setup asks you to.
-  if (drift > 0.015) {
-    score -= 2.5;
-    suggestions.push(`It sits ${(drift * 100).toFixed(1)}% above the ${price(plan.stopLoss, pos.currency)} level where`
-      + ` this setup breaks, which is inside the range the stock moves on an ordinary day.`);
-  } else if (drift < -0.04) {
-    score -= 1.5;
-    suggestions.push(`It sits ${(Math.abs(drift) * 100).toFixed(1)}% below the ${price(plan.stopLoss, pos.currency)} break level,`
-      + ` so you would lose more than the setup requires before getting out.`);
-  }
-
-  // Round before banding, so the label always matches the number on screen.
   score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
-  const label = score >= 8.5 ? "Well placed and covers the position"
-    : score >= 6 ? "Sound, with something to tidy"
-    : score >= 3 ? "Leaves part of the position exposed"
-    : "Not doing the job";
+  const shortOfCover = coverage < 0.99;
 
   return {
-    score, label, suggestions,
+    score,
     tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
+    label: score >= 8.5 ? "Well placed and covers the position"
+      : score >= 6 ? "Sound, with something to tidy"
+      : score >= 3 ? "Leaves part of the position exposed"
+      : "Not doing the job",
     detail: `${price(placed, pos.currency)} covering ${Math.round(coverage * 100)}% of the holding`,
+    // Only worth saying if acting on it changes something.
+    fix: shortOfCover || misplaced
+      ? `Change your stop loss to ${fmtQty(held)} shares at ${misplaced ? want : price(placed, pos.currency)}.`
+      : null,
+    wantQty: shortOfCover || misplaced ? held : o.stopQty,
   };
 }
-
 /**
  * Rate the sell limit. Distance is judged against the measured reward curve: the
  * payoff peaks around twice the risk, and a target further out fills so much less
@@ -943,14 +936,14 @@ function rateLimit(pos, plan, rewardCurve) {
   if (risk <= 0) return null;
 
   const best = bestMultiple(rewardCurve);
-  const suggestions = [];
+  const want = pos.averagePrice + risk * (best?.multiple ?? 2);
 
   if (!o || !o.limits.length) {
-    const at = pos.averagePrice + risk * (best?.multiple ?? 2);
     return {
       score: 3, tone: "mid", label: "No sell target placed",
-      detail: "Nothing sells automatically if it reaches your target — you would have to catch it yourself.",
-      suggestions: [`A limit at ${price(at, pos.currency)} is ${best?.multiple ?? 2}x your risk, where the payoff measured best.`],
+      detail: "Nothing sells automatically if it reaches your target.",
+      fix: `Add a sell target for ${fmtQty(held)} shares at ${price(want, pos.currency)}.`,
+      wantQty: held,
     };
   }
 
@@ -960,39 +953,35 @@ function rateLimit(pos, plan, rewardCurve) {
   const fillRate = atMultiple(rewardCurve, multiple, "hitRate");
   const payoff = atMultiple(rewardCurve, multiple, "expectancyR");
 
-  // Score the distance by how close its payoff is to the best on the curve.
   let score = 10 * Math.min(1, coverage);
-  if (best && payoff != null && best.expectancyR > 0) {
-    score -= 4 * Math.max(0, Math.min(1, 1 - payoff / best.expectancyR));
-  }
-
-  if (coverage < 0.999) {
-    suggestions.push(`Your target covers ${fmtQty(o.limitQty)} of ${fmtQty(held)} shares`
-      + ` (${Math.round(coverage * 100)}%), so the rest would stay in after it fills.`);
-  }
-  if (best && Math.abs(multiple - best.multiple) > 0.25) {
-    const at = pos.averagePrice + risk * best.multiple;
-    suggestions.push(`At ${price(at, pos.currency)} — ${best.multiple}x your risk — past setups filled`
-      + ` ${Math.round(best.hitRate * 100)}% of the time against ${fillRate == null ? "—" : Math.round(fillRate * 100) + "%"}`
-      + ` at your ${price(placed, pos.currency)}, and that is where the payoff measured best.`);
-  }
-
-  // Round before banding, so the label always matches the number on screen.
+  // How much of the best available payoff this distance gives up.
+  const givingUp = best && payoff != null && best.expectancyR > 0
+    ? Math.max(0, 1 - payoff / best.expectancyR)
+    : 0;
+  score -= 4 * Math.min(1, givingUp);
   score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
-  const label = score >= 8.5 ? "Well placed and covers the position"
-    : score >= 6 ? "Reasonable, with something to tidy"
-    : score >= 3 ? "Covers only part, or set too far out"
-    : "Unlikely to do much";
+
+  const shortOfCover = coverage < 0.99;
+  // Nudging a target a few percent is not worth the bother; a fifth of the
+  // payoff is. Anything smaller and we would be inventing work.
+  const worthMoving = givingUp > 0.2;
 
   return {
-    score, label, suggestions,
+    score,
     tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
+    label: score >= 8.5 ? "Well placed and covers the position"
+      : score >= 6 ? "Reasonable, with something to tidy"
+      : score >= 3 ? "Covers only part, or set too far out"
+      : "Unlikely to do much",
     detail: `${price(placed, pos.currency)}, ${multiple.toFixed(1)}x your risk`
       + `${fillRate == null ? "" : `, reached by ${Math.round(fillRate * 100)}% of past setups`}`,
+    fix: shortOfCover || worthMoving
+      ? `Change your sell target to ${fmtQty(held)} shares at ${price(worthMoving ? want : placed, pos.currency)}.`
+      : null,
+    wantQty: shortOfCover || worthMoving ? held : o.limitQty,
   };
 }
-
-/** Both order ratings, plus anything worth changing. */
+/** Both order ratings, and the changes worth making — nothing more. */
 function ordersHtml(pos, stocks, rewardCurve) {
   const plan = pos.plan;
   if (!plan || plan.breached) return "";
@@ -1008,20 +997,23 @@ function ordersHtml(pos, stocks, rewardCurve) {
     <div class="ord-detail">${r.detail}</div>
   </div>`;
 
-  const fixes = [...(stop?.suggestions ?? []), ...(limit?.suggestions ?? [])];
-  const over = pos.orders && pos.quantity
-    && (pos.orders.stopQty + pos.orders.limitQty) > pos.quantity + 1e-8;
+  const fixes = [stop?.fix, limit?.fix].filter(Boolean);
+
+  // Both orders at full size may be more shares than Trading 212 will let you
+  // commit at once — your existing pair splits the holding exactly, which is what
+  // that limit looks like. Say so rather than hand you two orders that clash.
+  const wanted = (stop?.wantQty ?? 0) + (limit?.wantQty ?? 0);
+  const clash = fixes.length > 1 && pos.quantity && wanted > pos.quantity + 1e-8;
 
   return `<div class="orders">
     <div class="plan-head">Your orders at Trading 212</div>
     ${row("Stop loss", stop)}
     ${row("Sell target", limit)}
-    ${over ? `<p class="pos-note bad-t">Your stop and target together cover more shares than you hold,
-      so one of them cannot fill in full.</p>` : ""}
-    ${fixes.length ? `<div class="fixes"><div class="fixes-head">Worth changing</div>
-      <ul>${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>
-      <p class="pos-note">These are read from your live orders. The dashboard has read-only access
-        and never places or changes anything &mdash; any edit is yours to make in the app.</p></div>` : ""}
+    ${fixes.length
+      ? `<ul class="fixes-list">${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>
+         ${clash ? `<p class="pos-note">Trading 212 may not accept both at full size. The stop is the one worth having.</p>` : ""}
+         <p class="pos-note">Read-only here &mdash; make any change in the app.</p>`
+      : `<p class="pos-note">Both look right as they are.</p>`}
   </div>`;
 }
 function planHtml(pos) {
