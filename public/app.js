@@ -177,6 +177,15 @@ function tradeAt(price, entry, curve) {
     // minus how often it fails, times what that costs.
     expectancy: hitRate == null ? null : hitRate * gainPct - (1 - hitRate) * lossPct,
     needsNewHigh: exit > entry.recentHigh,
+    // By how much, not merely whether. A target a hair above the recent high is
+    // a different proposition from one 5% above it, and scoring them alike put a
+    // cliff in the middle of the slider.
+    aboveHighPct: entry.recentHigh > 0 && exit > entry.recentHigh
+      ? ((exit - entry.recentHigh) / entry.recentHigh) * 100
+      : 0,
+    belowZonePct: price < entry.low && entry.low > 0
+      ? ((entry.low - price) / entry.low) * 100
+      : 0,
     abovePct,
     winDays,
     lossDays: curve?.lossDays ?? null,
@@ -208,8 +217,18 @@ function worthScore(t, s) {
   // Buying above the zone used to cost a flat 2.5 points, a figure I had picked
   // rather than measured. The hit rate now falls with the distance paid, which
   // is both harsher and defensible, so the invented penalty is gone.
-  if (t.belowZone) { score -= 0.5; holdingBack.push('the price is below the zone, which we have not measured'); }
-  if (t.needsNewHigh) { score -= 1.2; holdingBack.push('the target needs a fresh 20-day high'); }
+  // Both of these used to be all-or-nothing, which meant a penny of price
+  // movement could move the score by more than a point. They now come on in
+  // proportion to how far past the line you actually are, reaching full strength
+  // at 2% below the zone and 4% above the recent high respectively.
+  // Always subtract; only the wording is gated. Gating the subtraction put a
+  // step back in at the threshold, which is the very thing the ramp removes.
+  const belowPenalty = 0.5 * Math.min(1, t.belowZonePct / 2);
+  score -= belowPenalty;
+  if (belowPenalty > 0.1) holdingBack.push('the price is below the zone, which we have not measured');
+  const newHighPenalty = 1.2 * Math.min(1, t.aboveHighPct / 4);
+  score -= newHighPenalty;
+  if (newHighPenalty > 0.1) holdingBack.push('the target needs a fresh 20-day high');
   if (met('earnings') === false) { score -= 1.0; holdingBack.push('earnings are due within days'); }
   if (met('trend') === false)    { score -= 0.8; holdingBack.push('the medium-term trend is not up'); }
   if (s.risk?.level === 'High')  { score -= 0.6; holdingBack.push('this is a high-risk stock'); }
