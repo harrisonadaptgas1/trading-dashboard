@@ -121,23 +121,29 @@ function sparkline(values) {
  */
 function ladderHtml(e) {
   if (!e?.ladder?.length) return '';
-  const best = Math.max(...e.ladder.map((r) => r.rewardRisk ?? 0));
+  const worst = Math.max(...e.ladder.map((r) => r.movePct));
+  const anyNewHigh = e.ladder.some((r) => r.needsNewHigh);
 
-  const rows = e.ladder.map((r) => {
-    const tone = r.rewardRisk >= 2 ? 'good-t' : r.rewardRisk >= 1.5 ? '' : 'bad-t';
-    return `<div class="ladder-row${r.rewardRisk === best ? ' best' : ''}">
+  const rows = e.ladder.map((r) => `<div class="ladder-row${r.needsNewHigh ? ' stretch' : ' ok'}">
       <span class="ladder-price">$${r.price}</span>
-      <span class="ladder-bar"><i style="width:${Math.min(100, (r.rewardRisk / best) * 100)}%"></i></span>
-      <strong class="${tone}">${r.rewardRisk == null ? '—' : `${r.rewardRisk} : 1`}</strong>
-    </div>`;
-  }).join('');
+      <span class="ladder-arrow">&rarr;</span>
+      <span class="ladder-exit">$${r.exit}</span>
+      <span class="ladder-bar"><i style="width:${Math.min(100, (r.movePct / worst) * 100)}%"></i></span>
+      <strong class="${r.needsNewHigh ? 'bad-t' : 'good-t'}">+${r.movePct}%</strong>
+    </div>`).join('');
 
   return `<div class="ladder">
-    <div class="ladder-head">What you get depending on where you buy</div>
+    <div class="ladder-head">
+      <span>Buy at</span><span>Sell at</span><span>Move needed</span>
+    </div>
     ${rows}
-    <p class="entry-note">Same exit and stop throughout — only the price you pay changes.
-      Buying at the bottom of the zone is a materially better trade than the top,
-      which is the point of showing a range rather than one number.</p>
+    <p class="entry-note">Every row is the same <strong>2:1 payoff</strong> — each exit is
+      twice the risk that entry carries, above the same stop loss. So the cost of paying
+      more is not a worse ratio, it is a bigger move required to earn it.
+      ${anyNewHigh
+        ? `<strong class="bad-t">Rows in red need a new 20-day high</strong> (above $${e.recentHigh}),
+           which is a harder ask than simply returning to a level it has already reached.`
+        : 'All three targets sit below the recent 20-day high, so none needs a fresh high to get there.'}</p>
   </div>`;
 }
 

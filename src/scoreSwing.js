@@ -159,20 +159,22 @@ export function computeEntry(closes, highs, lows) {
   // letting a zone-based percentage be read as today's risk.
   const stopFromTodayPct = Number((((price - breaksBelow) / price) * 100).toFixed(1));
 
-  // Where you buy inside the zone is the biggest single lever on the trade:
-  // the bottom can be two or three times the reward-per-unit-risk of the top.
-  // Showing only the midpoint makes the range look like vagueness rather than
-  // a gradient, so hand the UI all three points.
+  // Each entry gets its own exit, set at the same 2:1 payoff on the risk that
+  // entry actually carries. Holding the ratio constant makes the cost of paying
+  // more concrete: the move required grows, and past a point the target needs a
+  // new 20-day high, which is a far higher bar than simply retesting the old one.
   const ladder = [['Bottom', low], ['Middle', (low + high) / 2], ['Top', high]]
     .map(([label, p]) => {
-      const gain = ((exit - p) / p) * 100;
-      const loss = ((p - breaksBelow) / p) * 100;
+      const risk = p - breaksBelow;
+      const target = p + risk * 2;
       return {
         label,
         price: round(p),
-        gainPct: Number(gain.toFixed(1)),
-        lossPct: Number(loss.toFixed(1)),
-        rewardRisk: loss > 0 ? Number((gain / loss).toFixed(1)) : null,
+        exit: round(target),
+        movePct: Number((((target - p) / p) * 100).toFixed(1)),
+        lossPct: Number((((p - breaksBelow) / p) * 100).toFixed(1)),
+        // Does this target need a fresh high, or just a return to the old one?
+        needsNewHigh: target > recentHigh,
       };
     });
 

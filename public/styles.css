@@ -355,13 +355,18 @@ details.hc[open] > summary::before { content: "▾ "; }
 /* ---------- entry ladder ---------- */
 .ladder { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
 .ladder-head {
-  color: var(--muted); font-size: 0.68rem; text-transform: uppercase;
-  letter-spacing: 0.05em; margin-bottom: 8px;
+  display: flex; gap: 8px; align-items: center;
+  color: var(--muted); font-size: 0.66rem; text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 7px;
 }
-.ladder-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 0.82rem; }
-.ladder-price { min-width: 72px; font-variant-numeric: tabular-nums; color: var(--muted); }
-.ladder-row.best .ladder-price { color: var(--text); font-weight: 600; }
-.ladder-bar { flex: 1; height: 6px; background: var(--card-2); border-radius: 3px; overflow: hidden; }
-.ladder-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-.ladder-row.best .ladder-bar i { background: var(--good); }
-.ladder-row strong { min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
+.ladder-head span:nth-child(1) { min-width: 66px; }
+.ladder-head span:nth-child(2) { min-width: 80px; }
+.ladder-head span:nth-child(3) { margin-left: auto; }
+.ladder-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 0.83rem; }
+.ladder-price { min-width: 66px; font-variant-numeric: tabular-nums; }
+.ladder-arrow { color: var(--muted); margin-left: -6px; }
+.ladder-exit { min-width: 72px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.ladder-bar { flex: 1; height: 6px; background: var(--card-2); border-radius: 3px; overflow: hidden; min-width: 30px; }
+.ladder-bar i { display: block; height: 100%; border-radius: 3px; background: var(--good); }
+.ladder-row.stretch .ladder-bar i { background: var(--bad); }
+.ladder-row strong { min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
