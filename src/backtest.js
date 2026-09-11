@@ -38,6 +38,10 @@ export function runBacktest(series, computeEntry, options = {}) {
   // Snapshots of how far between stop and target each trade stood while it was
   // open, in tenths, so we can ask later what happened to trades that got this far.
   const progress = [];
+  // The furthest each trade ran before it ended, measured in multiples of the
+  // risk taken. One walk gives the hit rate for ANY target distance, which is
+  // what lets a sell limit be rated rather than guessed at.
+  const runs = [];
   let i = MIN_BARS;
 
   while (i < closes.length - 1) {
@@ -70,7 +74,10 @@ export function runBacktest(series, computeEntry, options = {}) {
       exit = entry + risk * 2;
     }
 
-    let resolved = false;
+    // Record the outcome as it happens rather than inferring it afterwards from
+    // the tail of the win/loss arrays — those can coincide across trades that
+    // happened to run the same number of days, and quietly mislabel one.
+    let outcome = 'open';
     let held = 0;
     const path = [];
     for (let j = i + 1; j < Math.min(i + 1 + MAX_HOLD, closes.length); j++) {
@@ -79,18 +86,31 @@ export function runBacktest(series, computeEntry, options = {}) {
       const hitTarget = highs[j] >= exit;
 
       // Both in one bar: we cannot know the order intraday, so assume the worse.
-      if (hitStop) { losses++; lossBars.push(held); resolved = true; break; }
-      if (hitTarget) { wins++; winBars.push(held); resolved = true; break; }
+      if (hitStop) { outcome = 'loss'; break; }
+      if (hitTarget) { outcome = 'win'; break; }
 
       const fraction = (closes[j] - stopLoss) / (exit - stopLoss);
       path.push(Math.max(0, Math.min(9, Math.floor(fraction * 10))));
     }
 
-    if (!resolved) unresolved++;
-    const outcome = !resolved ? 'open' : winBars[winBars.length - 1] === held ? 'win' : 'loss';
+    if (outcome === 'loss') { losses++; lossBars.push(held); }
+    else if (outcome === 'win') { wins++; winBars.push(held); }
+    else unresolved++;
+
+    // How far this setup would have run for a target at ANY distance. It has to
+    // be walked separately: the loop above closes the trade at our own exit, so
+    // reusing it would cap the high-water mark there and make every larger
+    // target look unreachable. Here only the stop, or running out of days, ends
+    // the walk — which is exactly what a resting sell limit would have faced.
+    let maxR = 0, runStopped = false;
+    for (let j = i + 1; j < Math.min(i + 1 + MAX_HOLD, closes.length); j++) {
+      // Stop checked first, keeping the same assume-the-worse rule as above.
+      if (lows[j] <= stopLoss) { runStopped = true; break; }
+      maxR = Math.max(maxR, (highs[j] - entry) / (entry - stopLoss));
+    }
+    runs.push({ maxR: Number(maxR.toFixed(3)), stopped: runStopped });
     for (const bucket of path) progress.push([bucket, outcome]);
     totalHeld += held;
-
     // Skip past this trade so overlapping signals are not double counted.
     i += Math.max(held, 1);
   }
@@ -114,6 +134,7 @@ export function runBacktest(series, computeEntry, options = {}) {
     avgBarsHeld: occurrences ? Math.round(totalHeld / occurrences) : null,
     // Trading days to each outcome, and how often neither arrived inside maxHold.
     progress,
+    runs,
     winDays: median(winBars),
     lossDays: median(lossBars),
     unresolvedPct: occurrences ? Math.round((unresolved / occurrences) * 100) : null,

@@ -158,3 +158,21 @@ export async function getPortfolio(key, secret) {
     cashError: cash?.__error ?? null,
   };
 }
+
+/**
+ * Pending orders, so the dashboard can check that what you have actually set
+ * matches what you think you have set. Read-only, like everything else here:
+ * the key has no order permissions and nothing is ever placed or cancelled.
+ */
+export async function getOrders(key, secret) {
+  const auth = authHeader(key, secret);
+  for (const [type, host] of Object.entries(HOSTS)) {
+    try {
+      const rows = await call(host, '/equity/orders', auth);
+      if (Array.isArray(rows)) return { available: true, accountType: type, orders: rows };
+    } catch (err) {
+      if (err.auth) continue; // wrong environment for this key, try the other
+    }
+  }
+  return { available: false, orders: [] };
+}

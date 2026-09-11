@@ -10,7 +10,7 @@ import { yf, getStockData, mapWithLimit } from './yahoo.js';
 import { getNews } from './news.js';
 import { scoreSwingStock, computeEntry } from './scoreSwing.js';
 import { scoreLongTermStock } from './scoreLongTerm.js';
-import { getPortfolio, fetchInstruments } from './trading212.js';
+import { getPortfolio, fetchInstruments, getOrders } from './trading212.js';
 import { getT212Credentials } from './secrets.js';
 import { resolveInstrument, getFxRate, loadT212Metadata } from './instruments.js';
 import { assessRisk, buildChecklist } from './risk.js';
@@ -286,6 +286,57 @@ function buildProgressCurve(cards) {
     };
   });
 }
+/**
+ * How often a setup reached a target set at k times the risk, before its stop.
+ *
+ * Built from the high-water mark of every past trade, so one walk answers the
+ * question for every distance at once. A trade that ran to 1.2R and then stopped
+ * out is a win for a 1R target and a loss for a 1.5R one, which is exactly how a
+ * real sell limit would have behaved.
+ *
+ * Pooled across the watchlist: this is a fact about how far these setups travel,
+ * not about any one company, and pooling turns a dozen trades into a couple of
+ * hundred.
+ */
+const REWARD_MULTIPLES = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
+
+function buildRewardCurve(cards) {
+  const runs = cards.flatMap((c) => c.backtest?.runs ?? []);
+  return REWARD_MULTIPLES.map((multiple) => {
+    let win = 0, loss = 0, open = 0;
+    for (const run of runs) {
+      if (run.maxR >= multiple) win++;
+      else if (run.stopped) loss++;
+      else open++; // ran out of time without reaching either
+    }
+    const decided = win + loss;
+    return {
+      multiple,
+      hitRate: decided >= 20 ? Number((win / decided).toFixed(3)) : null,
+      decided,
+      unresolved: open,
+      // What the average trade returns at this target, in multiples of risk.
+      expectancyR: decided >= 20
+        ? Number(((win / decided) * multiple - (1 - win / decided)).toFixed(3))
+        : null,
+    };
+  });
+}
+
+/** Pending sell orders for one holding, matched by the Trading 212 ticker. */
+function ordersFor(pos, orders) {
+  const mine = orders.filter((o) => o.ticker === pos.t212Ticker && o.side === 'SELL');
+  const qty = (list) => list.reduce((sum, o) => sum + Math.abs(o.quantity ?? 0), 0);
+  const stops = mine.filter((o) => /STOP/.test(o.type ?? ''));
+  const limits = mine.filter((o) => o.type === 'LIMIT');
+  if (!mine.length) return { stops: [], limits: [], stopQty: 0, limitQty: 0 };
+  return {
+    stops: stops.map((o) => ({ price: o.stopPrice, quantity: Math.abs(o.quantity ?? 0), id: o.id })),
+    limits: limits.map((o) => ({ price: o.limitPrice, quantity: Math.abs(o.quantity ?? 0), id: o.id })),
+    stopQty: Number(qty(stops).toFixed(8)),
+    limitQty: Number(qty(limits).toFixed(8)),
+  };
+}
 async function main() {
   const started = Date.now();
   const { tickers, limit } = parseArgs();
@@ -331,6 +382,7 @@ async function main() {
   // Portfolio is optional: no key means no portfolio, never a failed scan.
   const t212 = await getT212Credentials();
   const portfolio = await getPortfolio(t212.key, t212.secret);
+  const orderBook = await getOrders(t212.key, t212.secret);
   if (portfolio.available) {
     await loadT212Metadata(() => fetchInstruments(t212.key, t212.secret));
     const byTicker = new Map([...longTerm, ...swingTerm].map((s) => [s.ticker, s]));
@@ -361,6 +413,9 @@ async function main() {
       if (match) match.held = { quantity: pos.quantity, pplPct: pos.pplPct };
       // Where to get out, both ways, for what you actually paid.
       pos.plan = await buildPositionPlan(pos, match);
+      // What you have actually told Trading 212 to do, so the dashboard can
+      // check it against what it is recommending rather than assume.
+      pos.orders = ordersFor(pos, orderBook.orders ?? []);
     }
 
     // Biggest holdings first: what the money is actually in matters more than
@@ -376,6 +431,8 @@ async function main() {
       console.log(`  health check: ${flags} flag(s), ${notes} note(s)`);
     }
 
+    const withStops = portfolio.positions.filter((p) => p.orders?.stops.length).length;
+    console.log(`  pending orders: ${(orderBook.orders ?? []).length}, ${withStops} position(s) with a stop`);
     console.log(`\nTrading 212 (${portfolio.accountType}): ${portfolio.positions.length} positions, ` +
       `${portfolio.positions.filter((p) => p.onWatchlist).length} on the watchlist`);
   } else {
@@ -383,7 +440,8 @@ async function main() {
   }
 
   const progressCurve = buildProgressCurve(swingTerm);
-  for (const card of swingTerm) delete card.backtest?.progress;
+  const rewardCurve = buildRewardCurve(swingTerm);
+  for (const card of swingTerm) { delete card.backtest?.progress; delete card.backtest?.runs; }
 
   const output = {
     generatedAt: new Date().toISOString(),
@@ -392,6 +450,7 @@ async function main() {
     config: { swingWeights: config.swing.weights, longTermWeights: config.longTerm.weights },
     sectorMedianPE: medians,
     progressCurve,
+    rewardCurve,
     longTerm,
     swingTerm,
     errors,

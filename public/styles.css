@@ -523,3 +523,34 @@ details.hc[open] > summary::before { content: "▾ "; }
 .chip.c-bad  strong { color: var(--bad); }
 /* The first block inside an open holding already carries its own spacing. */
 .pos .more-body > .rating:first-child { margin-top: 6px; }
+
+/* ---------- the orders you have placed ---------- */
+.orders { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ord {
+  margin-top: 9px; padding: 10px 12px; border-radius: 8px;
+  background: var(--card-2); border-left: 3px solid var(--muted);
+}
+.ord.o-good { border-left-color: var(--good); }
+.ord.o-mid  { border-left-color: var(--ok); }
+.ord.o-bad  { border-left-color: var(--bad); }
+.ord-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ord-title {
+  color: var(--muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.ord-num { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ord-num small { font-size: 0.7rem; font-weight: 500; color: var(--muted); }
+.o-good .ord-num { color: var(--good); }
+.o-mid  .ord-num { color: var(--ok); }
+.o-bad  .ord-num { color: var(--bad); }
+.o-good .meter-bar i { background: var(--good); }
+.o-mid  .meter-bar i { background: var(--ok); }
+.o-bad  .meter-bar i { background: var(--bad); }
+.ord-label { font-size: 0.82rem; line-height: 1.4; }
+.ord-detail { margin-top: 2px; color: var(--muted); font-size: 0.74rem; line-height: 1.4; }
+.fixes { margin-top: 12px; }
+.fixes-head {
+  color: var(--muted); font-size: 0.66rem; text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 6px;
+}
+.fixes ul { margin: 0; padding-left: 18px; }
+.fixes li { font-size: 0.8rem; line-height: 1.5; margin-bottom: 6px; }

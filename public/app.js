@@ -238,7 +238,8 @@ function worthScore(t, s) {
   // result back toward the middle when there are few past trades behind it.
   if ((s.entryCurve?.trades?.min ?? 99) < 15) score = 5 + (score - 5) * 0.85;
 
-  score = Math.max(0, Math.min(10, score));
+  // Round before banding, so the label always matches the number on screen.
+  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
   const verdict =
     score >= 8.5 ? 'About as well as a setup on this list ever scores'
     : score >= 7  ? 'Stacks up well against our rules'
@@ -847,6 +848,182 @@ function posChips(pos, stocks, progressCurve) {
   if (c) bits.push(`<span class="chip c-${c.tone}">Tracking <strong>${c.score.toFixed(1)}</strong></span>`);
   return bits.length ? `<div class="pos-chips">${bits.join("")}</div>` : "";
 }
+/* ---------- rating the orders you have actually placed ---------- */
+
+/** Read the measured reward curve at any target distance, interpolating between points. */
+function atMultiple(curve, multiple, field) {
+  const pts = (curve ?? []).filter((p) => p[field] != null);
+  if (!pts.length) return null;
+  if (multiple <= pts[0].multiple) return pts[0][field];
+  const last = pts[pts.length - 1];
+  if (multiple >= last.multiple) return last[field];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].multiple >= multiple) {
+      const lo = pts[i - 1], hi = pts[i];
+      const t = (multiple - lo.multiple) / (hi.multiple - lo.multiple);
+      return lo[field] + (hi[field] - lo[field]) * t;
+    }
+  }
+  return last[field];
+}
+
+/** The target distance with the best measured payoff, which is what to aim at. */
+function bestMultiple(curve) {
+  const pts = (curve ?? []).filter((p) => p.expectancyR != null);
+  if (!pts.length) return null;
+  return pts.reduce((best, p) => (p.expectancyR > best.expectancyR ? p : best), pts[0]);
+}
+
+/**
+ * Rate the stop you have placed. Coverage dominates, because a stop over part of
+ * a position leaves the rest unprotected however well it is priced, and placement
+ * is judged against the level where the setup actually breaks.
+ */
+function rateStop(pos, plan) {
+  const held = pos.quantity;
+  const o = pos.orders;
+  if (!plan || !held) return null;
+  const suggestions = [];
+
+  if (!o || !o.stops.length) {
+    return {
+      score: 0, tone: "bad", label: "No stop placed",
+      detail: "Trading 212 has no stop order for this holding, so nothing sells automatically if it falls.",
+      suggestions: [`Place a stop for all ${fmtQty(held)} shares at ${price(plan.stopLoss, pos.currency)}.`],
+    };
+  }
+
+  const coverage = o.stopQty / held;
+  // One stop is the normal case; average the prices if there are several.
+  const placed = o.stops.reduce((s, x) => s + x.price * x.quantity, 0) / o.stopQty;
+  const drift = (placed - plan.stopLoss) / plan.stopLoss;
+
+  let score = 10 * Math.min(1, coverage);
+  if (coverage < 0.999) {
+    suggestions.push(`Your stop covers ${fmtQty(o.stopQty)} of ${fmtQty(held)} shares`
+      + ` (${Math.round(coverage * 100)}%). The other ${fmtQty(held - o.stopQty)} would keep falling with nothing under them.`);
+  }
+
+  // Above the break level the stop sits inside ordinary daily movement; well
+  // below it you lose more than the setup asks you to.
+  if (drift > 0.015) {
+    score -= 2.5;
+    suggestions.push(`It sits ${(drift * 100).toFixed(1)}% above the ${price(plan.stopLoss, pos.currency)} level where`
+      + ` this setup breaks, which is inside the range the stock moves on an ordinary day.`);
+  } else if (drift < -0.04) {
+    score -= 1.5;
+    suggestions.push(`It sits ${(Math.abs(drift) * 100).toFixed(1)}% below the ${price(plan.stopLoss, pos.currency)} break level,`
+      + ` so you would lose more than the setup requires before getting out.`);
+  }
+
+  // Round before banding, so the label always matches the number on screen.
+  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
+  const label = score >= 8.5 ? "Well placed and covers the position"
+    : score >= 6 ? "Sound, with something to tidy"
+    : score >= 3 ? "Leaves part of the position exposed"
+    : "Not doing the job";
+
+  return {
+    score, label, suggestions,
+    tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
+    detail: `${price(placed, pos.currency)} covering ${Math.round(coverage * 100)}% of the holding`,
+  };
+}
+
+/**
+ * Rate the sell limit. Distance is judged against the measured reward curve: the
+ * payoff peaks around twice the risk, and a target further out fills so much less
+ * often that the extra gain does not pay for the misses.
+ */
+function rateLimit(pos, plan, rewardCurve) {
+  const held = pos.quantity;
+  const o = pos.orders;
+  if (!plan || !held || pos.averagePrice == null) return null;
+  const risk = pos.averagePrice - plan.stopLoss;
+  if (risk <= 0) return null;
+
+  const best = bestMultiple(rewardCurve);
+  const suggestions = [];
+
+  if (!o || !o.limits.length) {
+    const at = pos.averagePrice + risk * (best?.multiple ?? 2);
+    return {
+      score: 3, tone: "mid", label: "No sell target placed",
+      detail: "Nothing sells automatically if it reaches your target — you would have to catch it yourself.",
+      suggestions: [`A limit at ${price(at, pos.currency)} is ${best?.multiple ?? 2}x your risk, where the payoff measured best.`],
+    };
+  }
+
+  const coverage = o.limitQty / held;
+  const placed = o.limits.reduce((s, x) => s + x.price * x.quantity, 0) / o.limitQty;
+  const multiple = (placed - pos.averagePrice) / risk;
+  const fillRate = atMultiple(rewardCurve, multiple, "hitRate");
+  const payoff = atMultiple(rewardCurve, multiple, "expectancyR");
+
+  // Score the distance by how close its payoff is to the best on the curve.
+  let score = 10 * Math.min(1, coverage);
+  if (best && payoff != null && best.expectancyR > 0) {
+    score -= 4 * Math.max(0, Math.min(1, 1 - payoff / best.expectancyR));
+  }
+
+  if (coverage < 0.999) {
+    suggestions.push(`Your target covers ${fmtQty(o.limitQty)} of ${fmtQty(held)} shares`
+      + ` (${Math.round(coverage * 100)}%), so the rest would stay in after it fills.`);
+  }
+  if (best && Math.abs(multiple - best.multiple) > 0.25) {
+    const at = pos.averagePrice + risk * best.multiple;
+    suggestions.push(`At ${price(at, pos.currency)} — ${best.multiple}x your risk — past setups filled`
+      + ` ${Math.round(best.hitRate * 100)}% of the time against ${fillRate == null ? "—" : Math.round(fillRate * 100) + "%"}`
+      + ` at your ${price(placed, pos.currency)}, and that is where the payoff measured best.`);
+  }
+
+  // Round before banding, so the label always matches the number on screen.
+  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
+  const label = score >= 8.5 ? "Well placed and covers the position"
+    : score >= 6 ? "Reasonable, with something to tidy"
+    : score >= 3 ? "Covers only part, or set too far out"
+    : "Unlikely to do much";
+
+  return {
+    score, label, suggestions,
+    tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
+    detail: `${price(placed, pos.currency)}, ${multiple.toFixed(1)}x your risk`
+      + `${fillRate == null ? "" : `, reached by ${Math.round(fillRate * 100)}% of past setups`}`,
+  };
+}
+
+/** Both order ratings, plus anything worth changing. */
+function ordersHtml(pos, stocks, rewardCurve) {
+  const plan = pos.plan;
+  if (!plan || plan.breached) return "";
+  const stop = rateStop(pos, plan);
+  const limit = rateLimit(pos, plan, rewardCurve);
+  if (!stop && !limit) return "";
+
+  const row = (title, r) => !r ? "" : `<div class="ord o-${r.tone}">
+    <div class="ord-top"><span class="ord-title">${title}</span>
+      <span class="ord-num">${r.score.toFixed(1)}<small>/10</small></span></div>
+    <div class="meter-bar"><i style="width:${r.score * 10}%"></i></div>
+    <div class="ord-label">${r.label}</div>
+    <div class="ord-detail">${r.detail}</div>
+  </div>`;
+
+  const fixes = [...(stop?.suggestions ?? []), ...(limit?.suggestions ?? [])];
+  const over = pos.orders && pos.quantity
+    && (pos.orders.stopQty + pos.orders.limitQty) > pos.quantity + 1e-8;
+
+  return `<div class="orders">
+    <div class="plan-head">Your orders at Trading 212</div>
+    ${row("Stop loss", stop)}
+    ${row("Sell target", limit)}
+    ${over ? `<p class="pos-note bad-t">Your stop and target together cover more shares than you hold,
+      so one of them cannot fill in full.</p>` : ""}
+    ${fixes.length ? `<div class="fixes"><div class="fixes-head">Worth changing</div>
+      <ul>${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>
+      <p class="pos-note">These are read from your live orders. The dashboard has read-only access
+        and never places or changes anything &mdash; any edit is yours to make in the app.</p></div>` : ""}
+  </div>`;
+}
 function planHtml(pos) {
   const plan = pos.plan;
   if (!plan) {
@@ -891,7 +1068,7 @@ function planHtml(pos) {
       level already reached.</p>` : ''}
   </div>`;
 }
-function portfolioHtml(p, progressCurve, stocks) {
+function portfolioHtml(p, progressCurve, stocks, rewardCurve) {
   if (!p) return '<p class="no-news">Run a scan to load your portfolio.</p>';
   if (!p.available) {
     return `<div class="entry none"><div class="entry-head">Portfolio</div>
@@ -963,6 +1140,7 @@ function portfolioHtml(p, progressCurve, stocks) {
           ${entryRatingHtml(pos, stocks)}
           ${confidenceHtml(pos, progressCurve)}
           ${planHtml(pos)}
+          ${ordersHtml(pos, stocks, rewardCurve)}
         </div>
       </details>
       ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
@@ -1029,7 +1207,7 @@ function render(data) {
     : '';
   $('swing-cards').innerHTML = orderNote + (byWorthNow(data.swingTerm)
     .map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>');
-  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio, data.progressCurve, [...(data.longTerm ?? []), ...(data.swingTerm ?? [])]);
+  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio, data.progressCurve, [...(data.longTerm ?? []), ...(data.swingTerm ?? [])], data.rewardCurve);
   refreshCalcs();
 
   renderStamp(data);
