@@ -883,44 +883,59 @@ function rateStop(pos, plan) {
   const held = pos.quantity;
   const o = pos.orders;
   if (!plan || !held) return null;
-  const want = price(plan.stopLoss, pos.currency);
+  const want = plan.stopLoss;
 
   if (!o || !o.stops.length) {
     return {
       score: 0, tone: "bad", label: "No stop placed",
       detail: "Nothing sells automatically if this falls.",
-      fix: `Add a stop loss for ${fmtQty(held)} shares at ${want}.`,
+      fix: `Add a stop loss for ${fmtQty(held)} shares at ${price(want, pos.currency)}.`,
       wantQty: held,
     };
   }
 
   const coverage = o.stopQty / held;
   const placed = o.stops.reduce((s, x) => s + x.price * x.quantity, 0) / o.stopQty;
-  const drift = (placed - plan.stopLoss) / plan.stopLoss;
+  const drift = (placed - want) / want;
 
-  let score = 10 * Math.min(1, coverage);
+  // Two separate faults, and the card has to say which one it is looking at.
   // Above the break level a stop sits inside ordinary daily movement; well below
-  // it you lose more than the setup asks. Inside that band, leave it alone.
-  const misplaced = drift > 0.015 || drift < -0.04;
-  if (drift > 0.015) score -= 2.5;
-  else if (drift < -0.04) score -= 1.5;
-
-  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
+  // it you lose more than the setup asks. Inside that band the price is fine.
+  const tooTight = drift > 0.015;
+  const tooLoose = drift < -0.04;
+  const badPrice = tooTight || tooLoose;
   const shortOfCover = coverage < 0.99;
 
+  let score = 10 * Math.min(1, coverage);
+  if (tooTight) score -= 2.5;
+  else if (tooLoose) score -= 1.5;
+  score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
+
+  // Name the actual fault rather than a band, so a good price beside a low
+  // score does not read as a contradiction.
+  const pct = Math.round(coverage * 100);
+  const label = !shortOfCover && !badPrice ? "Priced well and covers the whole holding"
+    : shortOfCover && !badPrice ? `Priced well, but covers only ${pct}% of your shares`
+    : !shortOfCover && tooTight ? "Covers the holding, but sits inside normal daily movement"
+    : !shortOfCover && tooLoose ? "Covers the holding, but gives away more than the setup asks"
+    : `Covers only ${pct}% of your shares, and the level needs moving`;
+
+  // Say only what changes. Repeating a price that is already correct is what
+  // makes an instruction read as nonsense.
+  let fix = null;
+  if (shortOfCover && !badPrice) {
+    fix = `Increase your stop loss to cover all ${fmtQty(held)} shares. The ${price(placed, pos.currency)} price is right.`;
+  } else if (!shortOfCover && badPrice) {
+    fix = `Move your stop loss to ${price(want, pos.currency)}.`;
+  } else if (shortOfCover && badPrice) {
+    fix = `Change your stop loss to ${fmtQty(held)} shares at ${price(want, pos.currency)}.`;
+  }
+
   return {
-    score,
+    score, label, fix,
     tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
-    label: score >= 8.5 ? "Well placed and covers the position"
-      : score >= 6 ? "Sound, with something to tidy"
-      : score >= 3 ? "Leaves part of the position exposed"
-      : "Not doing the job",
-    detail: `${price(placed, pos.currency)} covering ${Math.round(coverage * 100)}% of the holding`,
-    // Only worth saying if acting on it changes something.
-    fix: shortOfCover || misplaced
-      ? `Change your stop loss to ${fmtQty(held)} shares at ${misplaced ? want : price(placed, pos.currency)}.`
-      : null,
-    wantQty: shortOfCover || misplaced ? held : o.stopQty,
+    detail: `${price(placed, pos.currency)}, covering ${pct}% of the holding`,
+    wantQty: fix ? held : o.stopQty,
   };
 }
 /**
@@ -953,32 +968,39 @@ function rateLimit(pos, plan, rewardCurve) {
   const fillRate = atMultiple(rewardCurve, multiple, "hitRate");
   const payoff = atMultiple(rewardCurve, multiple, "expectancyR");
 
-  let score = 10 * Math.min(1, coverage);
-  // How much of the best available payoff this distance gives up.
+  // How much of the best available payoff this distance gives up. Nudging a
+  // target a few percent is not worth the bother; a fifth of the payoff is.
   const givingUp = best && payoff != null && best.expectancyR > 0
     ? Math.max(0, 1 - payoff / best.expectancyR)
     : 0;
-  score -= 4 * Math.min(1, givingUp);
+  const badPrice = givingUp > 0.2;
+  const shortOfCover = coverage < 0.99;
+  const tooFar = multiple > (best?.multiple ?? 2);
+
+  let score = 10 * Math.min(1, coverage) - 4 * Math.min(1, givingUp);
   score = Number(Math.max(0, Math.min(10, score)).toFixed(1));
 
-  const shortOfCover = coverage < 0.99;
-  // Nudging a target a few percent is not worth the bother; a fifth of the
-  // payoff is. Anything smaller and we would be inventing work.
-  const worthMoving = givingUp > 0.2;
+  const pct = Math.round(coverage * 100);
+  const label = !shortOfCover && !badPrice ? "Priced well and covers the whole holding"
+    : shortOfCover && !badPrice ? `Priced well, but covers only ${pct}% of your shares`
+    : !shortOfCover ? `Covers the holding, but set ${tooFar ? "further out" : "closer"} than pays best`
+    : `Covers only ${pct}% of your shares, and the price needs moving`;
+
+  let fix = null;
+  if (shortOfCover && !badPrice) {
+    fix = `Increase your sell target to cover all ${fmtQty(held)} shares. The ${price(placed, pos.currency)} price is right.`;
+  } else if (!shortOfCover && badPrice) {
+    fix = `Move your sell target to ${price(want, pos.currency)}.`;
+  } else if (shortOfCover && badPrice) {
+    fix = `Change your sell target to ${fmtQty(held)} shares at ${price(want, pos.currency)}.`;
+  }
 
   return {
-    score,
+    score, label, fix,
     tone: score >= 7 ? "good" : score >= 4 ? "mid" : "bad",
-    label: score >= 8.5 ? "Well placed and covers the position"
-      : score >= 6 ? "Reasonable, with something to tidy"
-      : score >= 3 ? "Covers only part, or set too far out"
-      : "Unlikely to do much",
     detail: `${price(placed, pos.currency)}, ${multiple.toFixed(1)}x your risk`
       + `${fillRate == null ? "" : `, reached by ${Math.round(fillRate * 100)}% of past setups`}`,
-    fix: shortOfCover || worthMoving
-      ? `Change your sell target to ${fmtQty(held)} shares at ${price(worthMoving ? want : placed, pos.currency)}.`
-      : null,
-    wantQty: shortOfCover || worthMoving ? held : o.limitQty,
+    wantQty: fix ? held : o.limitQty,
   };
 }
 /** Both order ratings, and the changes worth making — nothing more. */
