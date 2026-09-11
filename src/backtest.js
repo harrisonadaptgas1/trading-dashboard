@@ -32,6 +32,9 @@ export function runBacktest(series, computeEntry, options = {}) {
   }
 
   let wins = 0, losses = 0, unresolved = 0, occurrences = 0, totalHeld = 0;
+  // How long each outcome took. Kept apart because they differ: a loss arrives
+  // quickly, while a win has to travel twice as far and takes roughly twice as long.
+  const winBars = [], lossBars = [];
   let i = MIN_BARS;
 
   while (i < closes.length - 1) {
@@ -72,8 +75,8 @@ export function runBacktest(series, computeEntry, options = {}) {
       const hitTarget = highs[j] >= exit;
 
       // Both in one bar: we cannot know the order intraday, so assume the worse.
-      if (hitStop) { losses++; resolved = true; break; }
-      if (hitTarget) { wins++; resolved = true; break; }
+      if (hitStop) { losses++; lossBars.push(held); resolved = true; break; }
+      if (hitTarget) { wins++; winBars.push(held); resolved = true; break; }
     }
 
     if (!resolved) unresolved++;
@@ -83,6 +86,15 @@ export function runBacktest(series, computeEntry, options = {}) {
     i += Math.max(held, 1);
   }
 
+  // Median, not mean: one setup that crawled to its target for a month should not
+  // drag the typical case with it.
+  const median = (list) => {
+    if (!list.length) return null;
+    const sorted = [...list].sort((x, y) => x - y);
+    const mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  };
+
   const decided = wins + losses;
   return {
     occurrences,
@@ -91,6 +103,10 @@ export function runBacktest(series, computeEntry, options = {}) {
     unresolved,
     hitRate: decided >= 1 ? Number((wins / decided).toFixed(3)) : null,
     avgBarsHeld: occurrences ? Math.round(totalHeld / occurrences) : null,
+    // Trading days to each outcome, and how often neither arrived inside maxHold.
+    winDays: median(winBars),
+    lossDays: median(lossBars),
+    unresolvedPct: occurrences ? Math.round((unresolved / occurrences) * 100) : null,
     // Below roughly 10 decided trades the rate is noise, and should be shown as such.
     reliable: decided >= 10,
   };

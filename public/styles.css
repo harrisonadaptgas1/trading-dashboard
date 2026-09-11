@@ -417,3 +417,11 @@ details.hc[open] > summary::before { content: "▾ "; }
   color: var(--muted); font-size: 0.78rem; line-height: 1.45;
   margin: 0 0 12px; padding: 0 2px;
 }
+
+.calc-time {
+  margin: 10px 0 0; font-size: 0.8rem; line-height: 1.5; color: var(--text);
+}
+.calc-time span {
+  display: block; color: var(--muted); font-size: 0.68rem;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px;
+}

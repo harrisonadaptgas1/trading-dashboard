@@ -144,6 +144,11 @@ function tradeAt(price, entry, curve) {
     ? Math.max(0.02, Math.min(0.98,
         curve.fit.intercept + curve.fit.slope * position - abovePct * HIT_DROP_PER_PCT_ABOVE))
     : null;
+  // Trading days to each outcome. The wait for a win stretches the higher you
+  // buy, because the target moves further off while the stop stays where it is.
+  const f = curve?.winDaysFit;
+  const winDays = f ? Math.max(1, Math.round(f.intercept + f.slope * position)) : null;
+
   const risk = price - entry.stopLoss;
   const exit = price + risk * 2;
   const gainPct = (risk * 2 / price) * 100;
@@ -158,6 +163,9 @@ function tradeAt(price, entry, curve) {
     expectancy: hitRate == null ? null : hitRate * gainPct - (1 - hitRate) * lossPct,
     needsNewHigh: exit > entry.recentHigh,
     abovePct,
+    winDays,
+    lossDays: curve?.lossDays ?? null,
+    unresolvedPct: curve?.unresolvedPct ?? null,
     belowZone: price < entry.low,
     outsideZone: price < entry.low || price > entry.high,
   };
@@ -252,6 +260,35 @@ function calculatorHtml(s) {
     <div class="calc-out"></div>
   </div>`;
 }
+/** Trading days are not calendar days: five of them make a week. */
+function inWeeks(days) {
+  const w = days / 5;
+  if (w < 0.8) return 'under a week';
+  if (w < 1.3) return 'about a week';
+  if (w < 1.8) return 'a week and a half';
+  return `about ${Math.round(w)} weeks`;
+}
+
+/** How long the money is likely to be tied up, and how often it just sits there. */
+function timeframeHtml(t) {
+  if (t.winDays == null && t.lossDays == null) return '';
+  const parts = [];
+  if (t.winDays != null) {
+    parts.push(`reaching the target took <strong>${t.winDays} trading days</strong>
+      (${inWeeks(t.winDays)})`);
+  }
+  if (t.lossDays != null) {
+    // Losses usually arrive first, but not always, and claiming otherwise when
+    // the numbers say the opposite would be plainly wrong on the card.
+    const sooner = t.winDays != null && t.lossDays < t.winDays;
+    parts.push(`${sooner ? 'hitting the stop came sooner, ' : 'hitting the stop took '}
+      <strong>${t.lossDays} days</strong> (${inWeeks(t.lossDays)})`);
+  }
+  // These are medians, so "typically" rather than "on average": one setup that
+  // crawled to its target for a month does not drag the figure with it.
+  return `<p class="calc-time"><span>How long</span> Typically, ${parts.join(', and ')}.${
+    t.unresolvedPct ? ` About ${t.unresolvedPct}% of past setups did neither within a month, and were given up on.` : ''}</p>`;
+}
 /** Fill in one calculator's output for the price currently entered. */
 function renderCalc(box, s) {
   const price = Number(box.querySelector('.calc-price').value);
@@ -270,6 +307,7 @@ function renderCalc(box, s) {
       <div><span>You risk</span><strong class="bad-t">&minus;${t.lossPct.toFixed(1)}%</strong></div>
       <div><span>You gain</span><strong class="good-t">+${t.gainPct.toFixed(1)}%</strong></div>
     </div>
+    ${timeframeHtml(t)}
     <div class="calc-verdict ${tone}">
       ${pct == null
         ? 'Not enough past setups at this price to measure a hit rate.'

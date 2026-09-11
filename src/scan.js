@@ -77,11 +77,35 @@ async function collect(entries, config) {
  * consistent across every stock, so we fit a straight line through the points
  * and quote that: the same measured trend, without the noise.
  */
+const median = (list) => {
+  if (!list.length) return null;
+  const sorted = [...list].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+};
+
 function buildEntryCurve(series) {
   const points = [0, 0.25, 0.5, 0.75, 1].map((position) => {
     const r = runBacktest(series, computeEntry, { entryPosition: position });
-    return { position, hitRate: r.hitRate, decided: r.wins + r.losses, avgBarsHeld: r.avgBarsHeld };
+    return {
+      position, hitRate: r.hitRate, decided: r.wins + r.losses, avgBarsHeld: r.avgBarsHeld,
+      winDays: r.winDays, lossDays: r.lossDays, unresolvedPct: r.unresolvedPct,
+    };
   });
+
+  // Time to a win stretches the higher you buy, because the target moves further
+  // away while the stop stays put. Time to a loss barely moves, so that is taken
+  // as one figure rather than fitted.
+  const fitLine = (list, value) => {
+    const pts = list.filter((p) => value(p) != null);
+    if (pts.length < 2) return null;
+    const meanX = pts.reduce((a, p) => a + p.position, 0) / pts.length;
+    const meanY = pts.reduce((a, p) => a + value(p), 0) / pts.length;
+    const varX = pts.reduce((a, p) => a + (p.position - meanX) ** 2, 0);
+    if (varX === 0) return null;
+    const slope = pts.reduce((a, p) => a + (p.position - meanX) * (value(p) - meanY), 0) / varX;
+    return { intercept: Number((meanY - slope * meanX).toFixed(4)), slope: Number(slope.toFixed(4)) };
+  };
 
   const usable = points.filter((p) => p.hitRate != null);
   if (usable.length < 2) return null;
@@ -100,6 +124,9 @@ function buildEntryCurve(series) {
       slope: Number(slope.toFixed(4)),
     },
     trades: { min: Math.min(...counts), max: Math.max(...counts) },
+    winDaysFit: fitLine(points, (p) => p.winDays),
+    lossDays: median(points.map((p) => p.lossDays).filter((d) => d != null)),
+    unresolvedPct: median(points.map((p) => p.unresolvedPct).filter((d) => d != null)),
   };
 }
 function toCard(data, news, scored, config, peerMedianPE) {
