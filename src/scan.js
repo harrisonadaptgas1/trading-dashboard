@@ -17,6 +17,7 @@ import { assessRisk, buildChecklist } from './risk.js';
 import { runBacktest } from './backtest.js';
 import { buildAnalystView } from './analysts.js';
 import { runHealthCheck } from './healthCheck.js';
+import { rememberStop, pruneStops } from './positionPlans.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = async (p) => JSON.parse(await readFile(join(ROOT, p), 'utf8'));
@@ -213,6 +214,56 @@ function toCard(data, news, scored, config, peerMedianPE) {
   };
 }
 
+/**
+ * The exit plan for a holding you already own.
+ *
+ * The stop is a level on the chart, so it is the same one the watchlist card
+ * shows — it does not care what you paid. The target does: it takes twice the
+ * risk your own fill price carries, which is the same 2:1 rule the calculator
+ * uses, so someone who paid more has further to travel for the same payoff.
+ */
+async function buildPositionPlan(pos, card) {
+  const entry = card?.entry;
+  if (!entry || entry.status === 'none' || pos.averagePrice == null) return null;
+
+  const paid = pos.averagePrice;
+  // Frozen the first time this position is seen, and reused forever after.
+  const remembered = await rememberStop(pos, entry.stopLoss);
+  const stopLoss = remembered?.stopLoss ?? entry.stopLoss;
+  const risk = paid - stopLoss;
+  // Already below the level that says the setup is broken: a 2:1 target off a
+  // negative risk would be nonsense, so report the breach instead of inventing one.
+  if (risk <= 0) {
+    return { stopLoss, target: null, breached: true, recentHigh: entry.recentHigh,
+             setAt: remembered?.setAt ?? null, currentLevel: entry.stopLoss };
+  }
+
+  const target = paid + risk * 2;
+  const qty = pos.quantity ?? 0;
+  return {
+    stopLoss: Number(stopLoss.toFixed(2)),
+    target: Number(target.toFixed(2)),
+    breached: false,
+    setAt: remembered?.setAt ?? null,
+    // Where the rules would put the stop today, so a drift away from the level
+    // you are actually holding to is visible rather than hidden.
+    currentLevel: Number(entry.stopLoss.toFixed(2)),
+    lossPct: Number(((risk / paid) * 100).toFixed(1)),
+    gainPct: Number((((target - paid) / paid) * 100).toFixed(1)),
+    lossAmount: Number((risk * qty).toFixed(2)),
+    gainAmount: Number((risk * 2 * qty).toFixed(2)),
+    // How far today's price sits from each level, which is what you watch.
+    toStopPct: pos.currentPrice == null ? null
+      : Number((((pos.currentPrice - stopLoss) / pos.currentPrice) * 100).toFixed(1)),
+    toTargetPct: pos.currentPrice == null ? null
+      : Number((((target - pos.currentPrice) / pos.currentPrice) * 100).toFixed(1)),
+    needsNewHigh: entry.recentHigh != null && target > entry.recentHigh,
+    recentHigh: entry.recentHigh,
+    winDays: card.entryCurve?.winDaysFit
+      ? Math.max(1, Math.round(card.entryCurve.winDaysFit.intercept + card.entryCurve.winDaysFit.slope))
+      : null,
+  };
+}
 async function main() {
   const started = Date.now();
   const { tickers, limit } = parseArgs();
@@ -286,11 +337,16 @@ async function main() {
       pos.category = match ? (longTerm.includes(match) ? 'Long-term' : 'Swing') : null;
       // Mark the watchlist card too, so a score is read knowing you hold it.
       if (match) match.held = { quantity: pos.quantity, pplPct: pos.pplPct };
+      // Where to get out, both ways, for what you actually paid.
+      pos.plan = await buildPositionPlan(pos, match);
     }
 
     // Biggest holdings first: what the money is actually in matters more than
     // which position happens to be up the most.
     portfolio.positions.sort((a, b) => (b.valueAccount ?? b.value ?? 0) - (a.valueAccount ?? a.value ?? 0));
+
+    // Forget plans for anything sold, so the store cannot grow without bound.
+    await pruneStops(portfolio.positions);
 
     portfolio.health = await runHealthCheck(portfolio, watchlist);
     if (portfolio.health) {

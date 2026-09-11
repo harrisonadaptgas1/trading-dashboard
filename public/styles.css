@@ -431,3 +431,28 @@ details.hc[open] > summary::before { content: "▾ "; }
   letter-spacing: 0.05em; color: var(--ok); white-space: nowrap;
 }
 .live-tag.live { color: var(--good); }
+
+/* ---------- exit plan on a holding ---------- */
+.plan { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.plan-head {
+  color: var(--muted); font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 9px;
+}
+.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.plan-grid > div {
+  padding: 9px 11px; border-radius: 8px; background: var(--card-2);
+  border-left: 3px solid var(--muted);
+}
+.plan-stop { border-left-color: var(--bad) !important; }
+.plan-target { border-left-color: var(--good) !important; }
+.plan-grid span {
+  display: block; color: var(--muted); font-size: 0.66rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.plan-grid strong {
+  display: block; font-size: 1.05rem; margin: 2px 0 1px; font-variant-numeric: tabular-nums;
+}
+.plan-stop strong { color: var(--bad); }
+.plan-target strong { color: var(--good); }
+.plan-grid em { font-style: normal; color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
+.pos-note { margin: 9px 0 0; color: var(--muted); font-size: 0.76rem; line-height: 1.45; }

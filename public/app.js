@@ -663,6 +663,55 @@ function healthHtml(h) {
 }
 
 /** Your Trading 212 holdings, cross-referenced against the watchlist. */
+/**
+ * Where to get out of a holding, both ways. The stop is a level on the chart and
+ * is the same one the watchlist card shows; the target is set off what you
+ * actually paid, so paying more means further to travel for the same payoff.
+ */
+function planHtml(pos) {
+  const plan = pos.plan;
+  if (!plan) {
+    return `<p class="pos-note">No stop or target: this is not one of the swing setups
+      the rules put levels on.</p>`;
+  }
+  if (plan.breached) {
+    return `<div class="plan breached">
+      <div class="plan-head">Exit plan</div>
+      <p class="pos-note">You paid less than the ${price(plan.stopLoss, pos.currency)} stop level,
+        so there is no 2:1 target to set from here. The setup these rules describe is
+        no longer the one you are in.</p>
+    </div>`;
+  }
+
+  return `<div class="plan">
+    <div class="plan-head">Exit plan</div>
+    <div class="plan-grid">
+      <div class="plan-stop">
+        <span>Stop loss</span>
+        <strong>${price(plan.stopLoss, pos.currency)}</strong>
+        <em>&minus;${plan.lossPct}% from what you paid${plan.lossAmount
+          ? `, about ${price(plan.lossAmount, pos.currency)}` : ''}</em>
+      </div>
+      <div class="plan-target">
+        <span>Sell target</span>
+        <strong>${price(plan.target, pos.currency)}</strong>
+        <em>+${plan.gainPct}%${plan.gainAmount
+          ? `, about ${price(plan.gainAmount, pos.currency)}` : ''}</em>
+      </div>
+    </div>
+    ${plan.toStopPct == null ? '' : `<p class="pos-note">From today&rsquo;s price the stop is
+      <strong>${plan.toStopPct}%</strong> below and the target <strong>${plan.toTargetPct}%</strong>
+      above.${plan.winDays ? ` Setups like this took about ${plan.winDays} trading days to reach
+      their target.` : ''}</p>`}
+    ${plan.setAt ? `<p class="pos-note">This stop is <strong>fixed</strong> at the level from when you
+      opened the position${plan.currentLevel != null && Math.abs(plan.currentLevel - plan.stopLoss) / plan.stopLoss > 0.01
+        ? `. On the latest bars the rules would put it at ${price(plan.currentLevel, pos.currency)}, but a stop
+          that moves with every scan is one that never gets hit` : ''}.</p>` : ''}
+    ${plan.needsNewHigh ? `<p class="pos-note">That target is above the recent 20-day high of
+      ${price(plan.recentHigh, pos.currency)}, so it needs a fresh high rather than a return to a
+      level already reached.</p>` : ''}
+  </div>`;
+}
 function portfolioHtml(p) {
   if (!p) return '<p class="no-news">Run a scan to load your portfolio.</p>';
   if (!p.available) {
@@ -728,6 +777,7 @@ function portfolioHtml(p) {
         <div><span>You paid</span><strong>${price(pos.averagePrice, pos.currency)}</strong></div>
         <div><span>Now</span><strong>${price(pos.currentPrice, pos.currency)}</strong></div>
       </div>
+      ${planHtml(pos)}
       ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
     </article>`;
   }).join('');
