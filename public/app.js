@@ -119,32 +119,96 @@ function sparkline(values) {
  * between bottom and top is usually two to three times the reward per unit of
  * risk, which makes this the most consequential number on the card.
  */
-function ladderHtml(e) {
-  if (!e?.ladder?.length) return '';
-  const worst = Math.max(...e.ladder.map((r) => r.movePct));
-  const anyNewHigh = e.ladder.some((r) => r.needsNewHigh);
+/**
+ * Work out the trade for one entry price. The hit rate is interpolated from
+ * backtests actually run at five points across the zone, so a lower entry
+ * reports a genuinely higher measured win rate rather than an assumed one.
+ */
+function tradeAt(price, entry, curve) {
+  const span = entry.high - entry.low;
+  const position = span > 0 ? Math.max(0, Math.min(1, (price - entry.low) / span)) : 0;
 
-  const rows = e.ladder.map((r) => `<div class="ladder-row${r.needsNewHigh ? ' stretch' : ' ok'}">
-      <span class="ladder-price">$${r.price}</span>
-      <span class="ladder-arrow">&rarr;</span>
-      <span class="ladder-exit">$${r.exit}</span>
-      <span class="ladder-bar"><i style="width:${Math.min(100, (r.movePct / worst) * 100)}%"></i></span>
-      <strong class="${r.needsNewHigh ? 'bad-t' : 'good-t'}">+${r.movePct}%</strong>
-    </div>`).join('');
+  let hitRate = null;
+  if (curve?.length) {
+    const points = curve.filter((c) => c.hitRate != null);
+    if (points.length) {
+      const after = points.find((c) => c.position >= position) ?? points[points.length - 1];
+      const before = [...points].reverse().find((c) => c.position <= position) ?? points[0];
+      hitRate = after.position === before.position
+        ? before.hitRate
+        : before.hitRate + (after.hitRate - before.hitRate)
+            * ((position - before.position) / (after.position - before.position));
+    }
+  }
 
-  return `<div class="ladder">
-    <div class="ladder-head">
-      <span>Buy at</span><span>Sell at</span><span>Move needed</span>
+  const risk = price - entry.stopLoss;
+  const exit = price + risk * 2;
+  const gainPct = (risk * 2 / price) * 100;
+  const lossPct = (risk / price) * 100;
+
+  return {
+    position, hitRate, exit,
+    stop: entry.stopLoss,
+    gainPct, lossPct,
+    // The average outcome per trade: how often it works, times what it pays,
+    // minus how often it fails, times what that costs.
+    expectancy: hitRate == null ? null : hitRate * gainPct - (1 - hitRate) * lossPct,
+    needsNewHigh: exit > entry.recentHigh,
+    outsideZone: price < entry.low || price > entry.high,
+  };
+}
+
+/** The per-card calculator. Rendered once; the numbers update as you type. */
+function calculatorHtml(s) {
+  const e = s.entry;
+  if (!e || e.status === 'none' || !s.entryCurve) return '';
+  const start = Number(((e.low + e.high) / 2).toFixed(2));
+  const step = e.high - e.low > 20 ? 1 : e.high - e.low > 2 ? 0.1 : 0.01;
+
+  return `<div class="calc" data-ticker="${esc(s.ticker)}">
+    <div class="calc-head">Try a price</div>
+    <p class="calc-hint">Type a price, or drag the slider between $${e.low} and $${e.high}, to see what that entry would mean.</p>
+    <div class="calc-input">
+      <span class="calc-currency">$</span>
+      <input type="number" class="calc-price" value="${start}"
+             min="${e.low}" max="${e.high}" step="${step}"
+             inputmode="decimal" aria-label="Entry price for ${esc(s.ticker)}">
+      <input type="range" class="calc-slider"
+             min="${e.low}" max="${e.high}" step="${step}" value="${start}"
+             aria-label="Entry price slider for ${esc(s.ticker)}">
     </div>
-    ${rows}
-    <p class="entry-note">Every row is the same <strong>2:1 payoff</strong> — each exit is
-      twice the risk that entry carries, above the same stop loss. So the cost of paying
-      more is not a worse ratio, it is a bigger move required to earn it.
-      ${anyNewHigh
-        ? `<strong class="bad-t">Rows in red need a new 20-day high</strong> (above $${e.recentHigh}),
-           which is a harder ask than simply returning to a level it has already reached.`
-        : 'All three targets sit below the recent 20-day high, so none needs a fresh high to get there.'}</p>
+    <div class="calc-out"></div>
   </div>`;
+}
+
+/** Fill in one calculator's output for the price currently entered. */
+function renderCalc(box, s) {
+  const price = Number(box.querySelector('.calc-price').value);
+  const out = box.querySelector('.calc-out');
+  if (!Number.isFinite(price) || price <= 0) { out.innerHTML = ''; return; }
+
+  const t = tradeAt(price, s.entry, s.entryCurve);
+  const pct = t.hitRate == null ? null : Math.round(t.hitRate * 100);
+  const tone = t.expectancy == null ? '' : t.expectancy > 1 ? 'in' : t.expectancy > 0 ? 'wait' : 'hot';
+
+  out.innerHTML = `
+    <div class="calc-grid">
+      <div><span>Stop loss</span><strong class="bad-t">$${t.stop.toFixed(2)}</strong></div>
+      <div><span>Exit target</span><strong class="good-t">$${t.exit.toFixed(2)}</strong></div>
+      <div><span>You risk</span><strong class="bad-t">&minus;${t.lossPct.toFixed(1)}%</strong></div>
+      <div><span>You gain</span><strong class="good-t">+${t.gainPct.toFixed(1)}%</strong></div>
+    </div>
+    <div class="calc-verdict ${tone}">
+      ${pct == null
+        ? 'Not enough past setups at this price to measure a hit rate.'
+        : `<strong>${pct}%</strong> of past setups bought here reached the target before the stop`}
+      ${t.expectancy == null ? '' :
+        `<div class="calc-ev">Average outcome <strong class="${t.expectancy >= 0 ? 'good-t' : 'bad-t'}">${
+          t.expectancy >= 0 ? '+' : ''}${t.expectancy.toFixed(1)}%</strong> per trade</div>`}
+    </div>
+    ${t.outsideZone ? '<p class="entry-note bad-t">That price is outside the entry zone, so the measured hit rate does not cover it.</p>' : ''}
+    ${t.needsNewHigh ? `<p class="entry-note">This target is above the recent 20-day high of $${s.entry.recentHigh}, so it needs a fresh high rather than a return to a level already reached.</p>` : ''}
+  `;
 }
 
 /** The wordy part of the entry block, split out so a card can collapse it. */
@@ -181,7 +245,7 @@ function entryHtml(e, { withNotes = true } = {}) {
       <div><span>Gain if it reaches the exit</span><strong class="good-t">+${e.rewardPct}%</strong></div>
       <div><span>Loss if the stop is hit</span><strong class="bad-t">&minus;${e.riskPct}%</strong></div>
     </div>
-    ${ladderHtml(e)}
+
     ${withNotes ? entryNotesHtml(e) : ''}
   </div>`;
 }
@@ -389,6 +453,7 @@ function cardHtml(s, { collapsible = false } = {}) {
     <p class="reason">${esc(s.reason)}</p>
     ${warnings}
     ${entryHtml(s.entry, { withNotes: !collapsible })}
+    ${calculatorHtml(s)}
     ${collapsible ? trackRecordHtml(s.backtest) : ''}
     ${collapsible
       // Collapsed, a card shows only what you need to judge it at a glance:
@@ -568,6 +633,7 @@ function render(data) {
   $('swing-shortlist').innerHTML = data.swingTerm.length ? shortlistHtml(data.swingTerm) : '';
   $('swing-cards').innerHTML = data.swingTerm.map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>';
   $('portfolio-body').innerHTML = portfolioHtml(data.portfolio);
+  refreshCalcs();
 
   renderStamp(data);
 
@@ -836,6 +902,30 @@ $('gh-setup').addEventListener('submit', (e) => {
   localStorage.setItem(GH_KEY, JSON.stringify(cfg));
   $('gh-setup').hidden = true;
   runScan();
+});
+
+/* ---------- the per-card calculators ---------- */
+
+const stockByTicker = (t) =>
+  [...(current?.longTerm ?? []), ...(current?.swingTerm ?? [])].find((s) => s.ticker === t);
+
+/** Draw every calculator's output for its current price. */
+function refreshCalcs() {
+  document.querySelectorAll('.calc').forEach((box) => {
+    const s = stockByTicker(box.dataset.ticker);
+    if (s) renderCalc(box, s);
+  });
+}
+
+// Delegated so it survives a re-render after each scan.
+$('swing-cards').addEventListener('input', (e) => {
+  const box = e.target.closest('.calc');
+  if (!box) return;
+  const price = e.target.value;
+  // Keep the number field and the slider in step with each other.
+  box.querySelectorAll('.calc-price, .calc-slider').forEach((el) => { el.value = price; });
+  const s = stockByTicker(box.dataset.ticker);
+  if (s) renderCalc(box, s);
 });
 
 const PANELS = ['long', 'swing', 'portfolio'];

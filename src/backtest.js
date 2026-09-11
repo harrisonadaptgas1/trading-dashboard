@@ -21,7 +21,11 @@ const MIN_BARS = 80;      // need enough history for the indicators to be valid
  * @param {{closes:number[],highs:number[],lows:number[]}} series
  * @param {(closes:number[],highs:number[],lows:number[]) => object|null} computeEntry
  */
-export function runBacktest(series, computeEntry) {
+export function runBacktest(series, computeEntry, options = {}) {
+  // Where in the entry zone to buy: 0 = the bottom, 1 = the top. Buying lower
+  // puts the stop further away in percentage terms, so it is genuinely less
+  // likely to be hit — which is why this is measured rather than assumed.
+  const { entryPosition = null } = options;
   const { closes, highs, lows } = series;
   if (closes.length < MIN_BARS + MAX_HOLD) {
     return { occurrences: 0, wins: 0, losses: 0, unresolved: 0, hitRate: null, reason: 'not enough history' };
@@ -43,8 +47,22 @@ export function runBacktest(series, computeEntry) {
     if (!levels || levels.status !== 'in-zone') { i++; continue; }
 
     occurrences++;
-    const entry = closes[i];
-    const { stopLoss, exit } = levels;
+
+    // Default behaviour enters at the signal bar's close with the levels as
+    // published. With an entryPosition we instead buy at that point in the zone
+    // and take a 2:1 target on the risk that entry carries, exactly as the
+    // calculator on the card does.
+    let entry, stopLoss, exit;
+    if (entryPosition == null) {
+      entry = closes[i];
+      ({ stopLoss, exit } = levels);
+    } else {
+      entry = levels.low + (levels.high - levels.low) * entryPosition;
+      stopLoss = levels.stopLoss;
+      const risk = entry - stopLoss;
+      if (risk <= 0) { i++; occurrences--; continue; }
+      exit = entry + risk * 2;
+    }
 
     let resolved = false;
     let held = 0;

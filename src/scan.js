@@ -85,6 +85,21 @@ function toCard(data, news, scored, config, peerMedianPE) {
   // long-term holdings have no target-or-stop outcome to measure.
   const backtest = scored.entry ? runBacktest(data.series, computeEntry) : null;
 
+  // Measured hit rate at five points across the entry zone, so the calculator
+  // on the card can report a real number for the price you type rather than
+  // reusing one figure regardless of what you pay.
+  const entryCurve = scored.entry?.status && scored.entry.status !== 'none'
+    ? [0, 0.25, 0.5, 0.75, 1].map((position) => {
+        const r = runBacktest(data.series, computeEntry, { entryPosition: position });
+        return {
+          position,
+          hitRate: r.hitRate,
+          decided: r.wins + r.losses,
+          avgBarsHeld: r.avgBarsHeld,
+        };
+      })
+    : null;
+
   // Hit rate alone is misleading: 45% with a 2:1 payoff beats 60% with 1:1.
   // Combine the measured hit rate with today's actual reward and risk to get the
   // average outcome per setup, in percent. Still backward-looking, but it is the
@@ -115,6 +130,7 @@ function toCard(data, news, scored, config, peerMedianPE) {
     risk,
     checklist,
     backtest,
+    entryCurve,
     analysts,
     ticker: data.ticker,
     name: data.name,

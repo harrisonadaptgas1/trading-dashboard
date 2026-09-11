@@ -159,25 +159,6 @@ export function computeEntry(closes, highs, lows) {
   // letting a zone-based percentage be read as today's risk.
   const stopFromTodayPct = Number((((price - breaksBelow) / price) * 100).toFixed(1));
 
-  // Each entry gets its own exit, set at the same 2:1 payoff on the risk that
-  // entry actually carries. Holding the ratio constant makes the cost of paying
-  // more concrete: the move required grows, and past a point the target needs a
-  // new 20-day high, which is a far higher bar than simply retesting the old one.
-  const ladder = [['Bottom', low], ['Middle', (low + high) / 2], ['Top', high]]
-    .map(([label, p]) => {
-      const risk = p - breaksBelow;
-      const target = p + risk * 2;
-      return {
-        label,
-        price: round(p),
-        exit: round(target),
-        movePct: Number((((target - p) / p) * 100).toFixed(1)),
-        lossPct: Number((((p - breaksBelow) / p) * 100).toFixed(1)),
-        // Does this target need a fresh high, or just a return to the old one?
-        needsNewHigh: target > recentHigh,
-      };
-    });
-
   const note = `${context} ${inZone
     ? 'Today’s price sits inside that zone.'
     : 'Reaching the zone would mean waiting for a dip.'} The exit level is ${exitBasis}.` +
@@ -195,7 +176,6 @@ export function computeEntry(closes, highs, lows) {
     fallToZonePct: inZone ? 0 : Number((((price - high) / price) * 100).toFixed(1)),
     riskPct: Number((((high - breaksBelow) / high) * 100).toFixed(1)),
     stopFromTodayPct,
-    ladder,
     // Gain from the middle of the zone to the exit, as a percentage.
     rewardPct: Number((((exit - mid) / mid) * 100).toFixed(1)),
     rewardRisk: rewardRisk == null ? null : Number(rewardRisk.toFixed(1)),
