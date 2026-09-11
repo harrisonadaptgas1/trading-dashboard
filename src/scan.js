@@ -191,6 +191,8 @@ function toCard(data, news, scored, config, peerMedianPE) {
     currency: data.fundamentals.currency,
     changePct: Number(data.changePct.toFixed(2)),
     asOf: data.asOf,
+    live: data.live,
+    lastClose: data.lastClose == null ? null : Number(data.lastClose.toFixed(2)),
     sector: data.fundamentals.sector,
     score: scored.score,
     reason: scored.reason,

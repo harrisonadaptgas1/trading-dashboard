@@ -425,3 +425,9 @@ details.hc[open] > summary::before { content: "▾ "; }
   display: block; color: var(--muted); font-size: 0.68rem;
   text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px;
 }
+
+.live-tag {
+  margin-top: 3px; font-size: 0.62rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ok); white-space: nowrap;
+}
+.live-tag.live { color: var(--good); }

@@ -97,20 +97,31 @@ const round = (v) => Number(v.toFixed(2));
  * Anchored on the 20-day average (the pullback magnet in an uptrend), floored at the
  * recent low, and widened by ATR so the band reflects how much the stock actually moves.
  */
-export function computeEntry(closes, highs, lows) {
+export function computeEntry(closes, highs, lows, livePrice = null) {
   const e20 = last(ema(closes, 20));
   const s50 = last(sma(closes, 50));
   const a = last(atr(highs, lows, closes, 14));
   if (!e20 || !s50 || !a) return null;
 
-  const price = last(closes);
+  // Two different prices, and keeping them apart is the whole point.
+  //
+  // The zone is built from the last completed session. It has to be: the band is
+  // drawn around the price, so feeding it a live quote would drag the zone along
+  // with the stock and "price is in the zone now" would be true by construction,
+  // whatever the stock did.
+  //
+  // Whether we are inside that band is then a question about now, and there the
+  // live print counts. A stock that gapped up 2% overnight has left the zone its
+  // last close sat in, and the dashboard should say so.
+  const barPrice = last(closes);
+  const price = livePrice ?? barPrice;
   const recentLow = Math.min(...lows.slice(-10));
   const recentHigh = Math.max(...highs.slice(-20));
-  const uptrend = price > s50;
+  const uptrend = barPrice > s50;
 
   // Our rules only describe pullbacks inside an uptrend. Below the medium-term
   // average there is no setup to put a level on, so we say so rather than invent one.
-  if (!uptrend && price < e20) {
+  if (!uptrend && barPrice < e20) {
     return {
       status: 'none',
       recentHigh: round(recentHigh),
@@ -119,17 +130,17 @@ export function computeEntry(closes, highs, lows) {
   }
 
   let low, high, context;
-  if (uptrend && price <= e20) {
-    low = Math.max(recentLow, price - a);
-    high = price + a * 0.25;
+  if (uptrend && barPrice <= e20) {
+    low = Math.max(recentLow, barPrice - a);
+    high = barPrice + a * 0.25;
     context = 'It has already pulled back to its short-term average.';
   } else if (uptrend) {
     low = Math.max(recentLow, e20 - a * 0.5);
     high = e20 + a * 0.5;
     context = 'It is trading above its short-term average.';
   } else {
-    low = price - a * 0.75;
-    high = price + a * 0.25;
+    low = barPrice - a * 0.75;
+    high = barPrice + a * 0.25;
     context = 'It is recovering but still below its medium-term average, so this is a less established setup.';
   }
 
@@ -236,7 +247,7 @@ export function scoreSwingStock(data, news, config) {
       Object.entries(parts).map(([k, v]) => [k, { score: Number(v.score.toFixed(1)), weight: weights[k], note: v.note }])
     ),
     warnings,
-    entry: computeEntry(closes, highs, lows),
+    entry: computeEntry(closes, highs, lows, data.price),
     metrics: { rsi: parts.rsi.value, volumeRatio: parts.volume.value, atrPct },
   };
 }

@@ -93,6 +93,21 @@ async function fetchPayload() {
 
 /* ---------- rendering ---------- */
 
+/**
+ * A price from outside market hours is not the same animal as one from inside.
+ * Pre-market and after-hours trading is thin, so a print can sit a long way from
+ * where the stock actually opens. Saying which you are looking at matters more
+ * than the two decimal places.
+ */
+function liveBadge(live) {
+  if (!live?.used) return '';
+  const when = live.at
+    ? new Date(live.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  const label = live.source === 'pre' ? 'Pre-market'
+    : live.source === 'post' ? 'After hours' : 'Live';
+  return `<div class="live-tag ${esc(live.source)}">${label}${when ? ' &middot; ' + when : ''}</div>`;
+}
 function sparkline(values) {
   if (!values || values.length < 2) return '';
   const w = 300, h = 40, pad = 2;
@@ -563,6 +578,7 @@ function cardHtml(s, { collapsible = false } = {}) {
       <div class="px">
         <div class="px-val">$${s.price.toFixed(2)}</div>
         <div class="px-chg ${dir}">${sign}${s.changePct.toFixed(2)}%</div>
+        ${liveBadge(s.live)}
       </div>
     </div>
     ${sparkline(s.sparkline)}

@@ -60,23 +60,66 @@ async function getFundamentals(ticker) {
   }
 }
 
+/**
+ * The price right now, which outside 14:30-21:00 UK is not the last daily close.
+ *
+ * Yahoo reports pre-market and after-hours prints as separate fields, so before
+ * the open the daily bar still says yesterday. A scan run at 14:25 that quotes
+ * yesterday's close is worse than useless when you are about to trade at 14:30.
+ *
+ * Pre- and post-market prints come from thin trading and can be a long way from
+ * where the stock actually opens, so the source is carried through and shown.
+ */
+async function getLivePrice(ticker) {
+  try {
+    const q = await yf.quote(ticker);
+    const state = q.marketState ?? null;
+    if (state === 'PRE' && q.preMarketPrice != null) {
+      return { price: q.preMarketPrice, source: 'pre', state, at: q.preMarketTime ?? null,
+               reference: q.regularMarketPrice ?? null };
+    }
+    if ((state === 'POST' || state === 'POSTPOST') && q.postMarketPrice != null) {
+      return { price: q.postMarketPrice, source: 'post', state, at: q.postMarketTime ?? null,
+               reference: q.regularMarketPrice ?? null };
+    }
+    if (q.regularMarketPrice != null) {
+      return { price: q.regularMarketPrice, source: state === 'REGULAR' ? 'live' : 'close',
+               state, at: q.regularMarketTime ?? null, reference: q.regularMarketPreviousClose ?? null };
+    }
+  } catch (err) {
+    console.warn(`  ! Live price unavailable for ${ticker}: ${err.message}`);
+  }
+  return null;
+}
 export async function getStockData({ ticker, name }) {
-  const [series, fundamentals] = await Promise.all([getHistory(ticker), getFundamentals(ticker)]);
+  const [series, fundamentals, live] = await Promise.all([
+    getHistory(ticker), getFundamentals(ticker), getLivePrice(ticker),
+  ]);
   const closes = series.closes;
-  const price = closes[closes.length - 1];
-  const prev = closes[closes.length - 2] ?? price;
+  const lastClose = closes[closes.length - 1];
+  const prevClose = closes[closes.length - 2] ?? lastClose;
+
+  // The live print wins when there is one. The daily bars are left untouched:
+  // the moving averages, RSI and the entry zone are built from completed
+  // sessions, and a thin pre-market print has no business rewriting a 20-day
+  // average. It moves where the price sits relative to those levels, not the
+  // levels themselves.
+  const useLive = live?.price != null && live.source !== 'close';
+  const price = useLive ? live.price : lastClose;
+  const against = useLive ? (live.reference ?? lastClose) : prevClose;
 
   return {
     ticker,
     name,
     price,
-    changePct: prev ? ((price - prev) / prev) * 100 : 0,
+    changePct: against ? ((price - against) / against) * 100 : 0,
     asOf: series.dates[series.dates.length - 1],
+    live: live ? { ...live, used: useLive } : null,
+    lastClose,
     series,
     fundamentals,
   };
 }
-
 /** Run tasks with limited concurrency and a small delay, to stay polite to Yahoo. */
 export async function mapWithLimit(items, limit, fn) {
   const results = [];
