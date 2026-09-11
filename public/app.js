@@ -815,6 +815,19 @@ function entryRatingHtml(pos, stocks) {
     ${paidMore > 0.005 ? `<p class="pos-note">At the bottom of the zone, ${price(entry.low, pos.currency)}, the measured hit rate was <strong>${Math.round(best.hitRate * 100)}%</strong> against your <strong>${Math.round(yours.hitRate * 100)}%</strong>, and the stop would have sat ${best.lossPct.toFixed(1)}% away rather than ${yours.lossPct.toFixed(1)}%.</p>` : ""}
   </div>`;
 }
+/**
+ * The two scores in a single line, shown whether the detail is open or shut.
+ * Collapsing a holding should hide the reasoning, never the verdict.
+ */
+function posChips(pos, stocks, progressCurve) {
+  const card = (stocks || []).find((s) => s.ticker === (pos.displayTicker || pos.ticker));
+  const r = entryRating(pos, card);
+  const c = confidence(pos, progressCurve);
+  const bits = [];
+  if (r) bits.push(`<span class="chip c-${r.tone}">Your price <strong>${r.rating.toFixed(1)}</strong></span>`);
+  if (c) bits.push(`<span class="chip c-${c.tone}">Tracking <strong>${c.score.toFixed(1)}</strong></span>`);
+  return bits.length ? `<div class="pos-chips">${bits.join("")}</div>` : "";
+}
 function planHtml(pos) {
   const plan = pos.plan;
   if (!plan) {
@@ -924,9 +937,15 @@ function portfolioHtml(p, progressCurve, stocks) {
         <div><span>You paid</span><strong>${price(pos.averagePrice, pos.currency)}</strong></div>
         <div><span>Now</span><strong>${price(pos.currentPrice, pos.currency)}</strong></div>
       </div>
-      ${entryRatingHtml(pos, stocks)}
-      ${confidenceHtml(pos, progressCurve)}
-      ${planHtml(pos)}
+      ${posChips(pos, stocks, progressCurve)}
+      <details class="more">
+        <summary><span class="more-open">Show detail</span><span class="more-shut">Hide detail</span></summary>
+        <div class="more-body">
+          ${entryRatingHtml(pos, stocks)}
+          ${confidenceHtml(pos, progressCurve)}
+          ${planHtml(pos)}
+        </div>
+      </details>
       ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
     </article>`;
   }).join('');

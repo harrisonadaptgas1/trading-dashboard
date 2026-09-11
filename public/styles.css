@@ -506,3 +506,20 @@ details.hc[open] > summary::before { content: "▾ "; }
 .rating-grid strong { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
 .rating .good-t { color: var(--good); }
 .rating .bad-t  { color: var(--bad); }
+
+/* ---------- collapsed summary of a holding ---------- */
+.pos-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.chip {
+  padding: 4px 9px; border-radius: 99px; font-size: 0.7rem;
+  background: var(--card-2); border: 1px solid var(--line); color: var(--muted);
+  white-space: nowrap;
+}
+.chip strong { font-variant-numeric: tabular-nums; margin-left: 2px; }
+.chip.c-good { border-color: var(--good); }
+.chip.c-good strong { color: var(--good); }
+.chip.c-mid  { border-color: var(--ok); }
+.chip.c-mid  strong { color: var(--ok); }
+.chip.c-bad  { border-color: var(--bad); }
+.chip.c-bad  strong { color: var(--bad); }
+/* The first block inside an open holding already carries its own spacing. */
+.pos .more-body > .rating:first-child { margin-top: 6px; }
