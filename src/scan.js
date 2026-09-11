@@ -264,6 +264,28 @@ async function buildPositionPlan(pos, card) {
       : null,
   };
 }
+/**
+ * Once a trade is open, how far it has travelled says a great deal about how it
+ * ends. Pooled across every swing stock, because this is a fact about the shape
+ * of these trades rather than about any one company — and pooling turns a dozen
+ * samples per stock into several hundred.
+ */
+function buildProgressCurve(cards) {
+  const tally = Array.from({ length: 10 }, () => ({ win: 0, loss: 0, open: 0 }));
+  for (const card of cards) {
+    for (const [bucket, outcome] of card.backtest?.progress ?? []) tally[bucket][outcome]++;
+  }
+  return tally.map((t, i) => {
+    const decided = t.win + t.loss;
+    return {
+      from: i / 10,
+      to: (i + 1) / 10,
+      hitRate: decided >= 20 ? Number((t.win / decided).toFixed(3)) : null,
+      decided,
+      unresolved: t.open,
+    };
+  });
+}
 async function main() {
   const started = Date.now();
   const { tickers, limit } = parseArgs();
@@ -360,12 +382,16 @@ async function main() {
     console.log(`\nTrading 212: ${portfolio.reason}`);
   }
 
+  const progressCurve = buildProgressCurve(swingTerm);
+  for (const card of swingTerm) delete card.backtest?.progress;
+
   const output = {
     generatedAt: new Date().toISOString(),
     dataAsOf: longTerm[0]?.asOf ?? swingTerm[0]?.asOf ?? null,
     portfolio,
     config: { swingWeights: config.swing.weights, longTermWeights: config.longTerm.weights },
     sectorMedianPE: medians,
+    progressCurve,
     longTerm,
     swingTerm,
     errors,

@@ -668,6 +668,74 @@ function healthHtml(h) {
  * is the same one the watchlist card shows; the target is set off what you
  * actually paid, so paying more means further to travel for the same payoff.
  */
+/**
+ * How a position you already hold is tracking, measured rather than felt.
+ *
+ * The question for a holding is not "was this worth buying" but "given where it
+ * has got to, how have trades like this ended". So it reads off the progress
+ * curve: of every past setup that stood this far between its stop and its target,
+ * what share went on to reach the target. Pooled across the watchlist, so each
+ * band rests on hundreds of observations rather than a dozen.
+ *
+ * It moves with the price because the price is what moves you along the journey.
+ * It is a conditional record of the past, not a probability of your trade.
+ */
+function confidence(pos, curve) {
+  const plan = pos.plan;
+  if (!plan || plan.breached || plan.target == null || !curve?.length) return null;
+  if (pos.currentPrice == null) return null;
+
+  const span = plan.target - plan.stopLoss;
+  if (span <= 0) return null;
+  const raw = (pos.currentPrice - plan.stopLoss) / span;
+  const progress = Math.max(0, Math.min(1, raw));
+
+  // Interpolate between band centres so the meter slides rather than jumps.
+  const points = curve.filter((b) => b.hitRate != null)
+    .map((b) => ({ at: (b.from + b.to) / 2, rate: b.hitRate, decided: b.decided }));
+  if (!points.length) return null;
+
+  let rate;
+  const after = points.find((p) => p.at >= progress);
+  const before = [...points].reverse().find((p) => p.at <= progress);
+  if (!after) rate = points[points.length - 1].rate;
+  else if (!before) rate = points[0].rate;
+  else if (after.at === before.at) rate = before.rate;
+  else rate = before.rate + (after.rate - before.rate) * ((progress - before.at) / (after.at - before.at));
+
+  const band = curve.find((b) => progress >= b.from && progress < b.to) ?? curve[curve.length - 1];
+  const score = Math.max(0, Math.min(10, rate * 10));
+  return {
+    score, progress, rate, band,
+    belowStop: raw < 0,
+    pastTarget: raw > 1,
+    tone: score >= 6.5 ? 'good' : score >= 4 ? 'mid' : 'bad',
+  };
+}
+
+/** The meter itself, with the sentence that says what the number is. */
+function confidenceHtml(pos, curve) {
+  const c = confidence(pos, curve);
+  if (!c) return '';
+
+  const headline = c.belowStop
+    ? 'The price is already through your stop level.'
+    : c.pastTarget
+      ? 'The price has passed your sell target.'
+      : `Of past setups that had got this far, <strong>${Math.round(c.rate * 100)}%</strong> went on to`
+        + ` reach the target before the stop.`;
+
+  return `<div class="meter m-${c.tone}">
+    <div class="meter-top">
+      <span class="meter-label">How it is tracking</span>
+      <span class="meter-num">${c.score.toFixed(1)}<small>/10</small></span>
+    </div>
+    <div class="meter-bar"><i style="width:${c.score * 10}%"></i></div>
+    <div class="meter-say">${headline}</div>
+    <div class="meter-sub">${Math.round(c.progress * 100)}% of the way from your stop to your target
+      &middot; based on ${c.band?.decided ?? 0} past trades that reached this point</div>
+  </div>`;
+}
 function planHtml(pos) {
   const plan = pos.plan;
   if (!plan) {
@@ -712,7 +780,7 @@ function planHtml(pos) {
       level already reached.</p>` : ''}
   </div>`;
 }
-function portfolioHtml(p) {
+function portfolioHtml(p, progressCurve) {
   if (!p) return '<p class="no-news">Run a scan to load your portfolio.</p>';
   if (!p.available) {
     return `<div class="entry none"><div class="entry-head">Portfolio</div>
@@ -777,6 +845,7 @@ function portfolioHtml(p) {
         <div><span>You paid</span><strong>${price(pos.averagePrice, pos.currency)}</strong></div>
         <div><span>Now</span><strong>${price(pos.currentPrice, pos.currency)}</strong></div>
       </div>
+      ${confidenceHtml(pos, progressCurve)}
       ${planHtml(pos)}
       ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
     </article>`;
@@ -842,7 +911,7 @@ function render(data) {
     : '';
   $('swing-cards').innerHTML = orderNote + (byWorthNow(data.swingTerm)
     .map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>');
-  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio);
+  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio, data.progressCurve);
   refreshCalcs();
 
   renderStamp(data);

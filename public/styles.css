@@ -456,3 +456,28 @@ details.hc[open] > summary::before { content: "▾ "; }
 .plan-target strong { color: var(--good); }
 .plan-grid em { font-style: normal; color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
 .pos-note { margin: 9px 0 0; color: var(--muted); font-size: 0.76rem; line-height: 1.45; }
+
+/* ---------- how a holding is tracking ---------- */
+.meter {
+  margin-top: 12px; padding: 11px 13px; border-radius: 9px;
+  background: var(--card-2); border-left: 3px solid var(--muted);
+}
+.meter.m-good { border-left-color: var(--good); }
+.meter.m-mid  { border-left-color: var(--ok); }
+.meter.m-bad  { border-left-color: var(--bad); }
+.meter-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.meter-label {
+  color: var(--muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.meter-num { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.meter-num small { font-size: 0.78rem; font-weight: 500; color: var(--muted); }
+.m-good .meter-num { color: var(--good); }
+.m-mid  .meter-num { color: var(--ok); }
+.m-bad  .meter-num { color: var(--bad); }
+.meter-bar { height: 6px; border-radius: 99px; background: var(--line); margin: 8px 0 7px; overflow: hidden; }
+.meter-bar i { display: block; height: 100%; border-radius: 99px; transition: width 0.15s linear; }
+.m-good .meter-bar i { background: var(--good); }
+.m-mid  .meter-bar i { background: var(--ok); }
+.m-bad  .meter-bar i { background: var(--bad); }
+.meter-say { font-size: 0.82rem; line-height: 1.45; }
+.meter-sub { margin-top: 4px; color: var(--muted); font-size: 0.72rem; line-height: 1.4; }

@@ -35,6 +35,9 @@ export function runBacktest(series, computeEntry, options = {}) {
   // How long each outcome took. Kept apart because they differ: a loss arrives
   // quickly, while a win has to travel twice as far and takes roughly twice as long.
   const winBars = [], lossBars = [];
+  // Snapshots of how far between stop and target each trade stood while it was
+  // open, in tenths, so we can ask later what happened to trades that got this far.
+  const progress = [];
   let i = MIN_BARS;
 
   while (i < closes.length - 1) {
@@ -69,6 +72,7 @@ export function runBacktest(series, computeEntry, options = {}) {
 
     let resolved = false;
     let held = 0;
+    const path = [];
     for (let j = i + 1; j < Math.min(i + 1 + MAX_HOLD, closes.length); j++) {
       held = j - i;
       const hitStop = lows[j] <= stopLoss;
@@ -77,9 +81,14 @@ export function runBacktest(series, computeEntry, options = {}) {
       // Both in one bar: we cannot know the order intraday, so assume the worse.
       if (hitStop) { losses++; lossBars.push(held); resolved = true; break; }
       if (hitTarget) { wins++; winBars.push(held); resolved = true; break; }
+
+      const fraction = (closes[j] - stopLoss) / (exit - stopLoss);
+      path.push(Math.max(0, Math.min(9, Math.floor(fraction * 10))));
     }
 
     if (!resolved) unresolved++;
+    const outcome = !resolved ? 'open' : winBars[winBars.length - 1] === held ? 'win' : 'loss';
+    for (const bucket of path) progress.push([bucket, outcome]);
     totalHeld += held;
 
     // Skip past this trade so overlapping signals are not double counted.
@@ -104,6 +113,7 @@ export function runBacktest(series, computeEntry, options = {}) {
     hitRate: decided >= 1 ? Number((wins / decided).toFixed(3)) : null,
     avgBarsHeld: occurrences ? Math.round(totalHeld / occurrences) : null,
     // Trading days to each outcome, and how often neither arrived inside maxHold.
+    progress,
     winDays: median(winBars),
     lossDays: median(lossBars),
     unresolvedPct: occurrences ? Math.round((unresolved / occurrences) * 100) : null,
