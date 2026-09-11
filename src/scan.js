@@ -67,6 +67,41 @@ async function collect(entries, config) {
   });
 }
 
+/**
+ * How the setup performed depending on where in the entry zone you bought.
+ *
+ * Each point is a separate backtest, but each rests on only 10-30 past trades,
+ * so one trade flipping moves a point by several percent. Reading those raw
+ * points straight off made the calculator jump up and down as you dragged the
+ * slider, implying detail the evidence does not support. The decline itself is
+ * consistent across every stock, so we fit a straight line through the points
+ * and quote that: the same measured trend, without the noise.
+ */
+function buildEntryCurve(series) {
+  const points = [0, 0.25, 0.5, 0.75, 1].map((position) => {
+    const r = runBacktest(series, computeEntry, { entryPosition: position });
+    return { position, hitRate: r.hitRate, decided: r.wins + r.losses, avgBarsHeld: r.avgBarsHeld };
+  });
+
+  const usable = points.filter((p) => p.hitRate != null);
+  if (usable.length < 2) return null;
+
+  const meanX = usable.reduce((a, p) => a + p.position, 0) / usable.length;
+  const meanY = usable.reduce((a, p) => a + p.hitRate, 0) / usable.length;
+  const varX = usable.reduce((a, p) => a + (p.position - meanX) ** 2, 0);
+  if (varX === 0) return null;
+  const slope = usable.reduce((a, p) => a + (p.position - meanX) * (p.hitRate - meanY), 0) / varX;
+
+  const counts = usable.map((p) => p.decided);
+  return {
+    points,
+    fit: {
+      intercept: Number((meanY - slope * meanX).toFixed(4)),
+      slope: Number(slope.toFixed(4)),
+    },
+    trades: { min: Math.min(...counts), max: Math.max(...counts) },
+  };
+}
 function toCard(data, news, scored, config, peerMedianPE) {
   const n = config.chart.sparklineDays;
 
@@ -89,17 +124,8 @@ function toCard(data, news, scored, config, peerMedianPE) {
   // on the card can report a real number for the price you type rather than
   // reusing one figure regardless of what you pay.
   const entryCurve = scored.entry?.status && scored.entry.status !== 'none'
-    ? [0, 0.25, 0.5, 0.75, 1].map((position) => {
-        const r = runBacktest(data.series, computeEntry, { entryPosition: position });
-        return {
-          position,
-          hitRate: r.hitRate,
-          decided: r.wins + r.losses,
-          avgBarsHeld: r.avgBarsHeld,
-        };
-      })
+    ? buildEntryCurve(data.series)
     : null;
-
   // Hit rate alone is misleading: 45% with a 2:1 payoff beats 60% with 1:1.
   // Combine the measured hit rate with today's actual reward and risk to get the
   // average outcome per setup, in percent. Still backward-looking, but it is the

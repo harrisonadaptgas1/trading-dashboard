@@ -128,19 +128,12 @@ function tradeAt(price, entry, curve) {
   const span = entry.high - entry.low;
   const position = span > 0 ? Math.max(0, Math.min(1, (price - entry.low) / span)) : 0;
 
-  let hitRate = null;
-  if (curve?.length) {
-    const points = curve.filter((c) => c.hitRate != null);
-    if (points.length) {
-      const after = points.find((c) => c.position >= position) ?? points[points.length - 1];
-      const before = [...points].reverse().find((c) => c.position <= position) ?? points[0];
-      hitRate = after.position === before.position
-        ? before.hitRate
-        : before.hitRate + (after.hitRate - before.hitRate)
-            * ((position - before.position) / (after.position - before.position));
-    }
-  }
-
+  // The fitted trend, not the raw backtest points. Each point rests on only a
+  // few dozen trades, so reading them straight off made this jump around as you
+  // dragged the slider — movement that was sampling noise, not evidence.
+  const hitRate = curve?.fit
+    ? Math.max(0.02, Math.min(0.98, curve.fit.intercept + curve.fit.slope * position))
+    : null;
   const risk = price - entry.stopLoss;
   const exit = price + risk * 2;
   const gainPct = (risk * 2 / price) * 100;
@@ -202,9 +195,11 @@ function renderCalc(box, s) {
       ${pct == null
         ? 'Not enough past setups at this price to measure a hit rate.'
         : `<strong>${pct}%</strong> of past setups bought here reached the target before the stop`}
+      ${pct == null || !s.entryCurve?.trades ? '' :
+        `<div class="calc-ev">Measured on ${s.entryCurve.trades.min}&ndash;${s.entryCurve.trades.max} past setups on ${esc(s.ticker)}, which is thin evidence &mdash; treat it as a rough steer.</div>`}
       ${t.expectancy == null ? '' :
-        `<div class="calc-ev">Average outcome <strong class="${t.expectancy >= 0 ? 'good-t' : 'bad-t'}">${
-          t.expectancy >= 0 ? '+' : ''}${t.expectancy.toFixed(1)}%</strong> per trade</div>`}
+        `<div class="calc-ev">Wins and losses together, that averages <strong class="${t.expectancy >= 0 ? 'good-t' : 'bad-t'}">${
+          t.expectancy >= 0 ? '+' : ''}${t.expectancy.toFixed(1)}%</strong> of your money per trade</div>`}
     </div>
     ${t.outsideZone ? '<p class="entry-note bad-t">That price is outside the entry zone, so the measured hit rate does not cover it.</p>' : ''}
     ${t.needsNewHigh ? `<p class="entry-note">This target is above the recent 20-day high of $${s.entry.recentHigh}, so it needs a fresh high rather than a return to a level already reached.</p>` : ''}
