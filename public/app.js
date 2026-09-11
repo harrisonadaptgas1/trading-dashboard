@@ -733,29 +733,6 @@ function confidence(pos, curve) {
   };
 }
 
-/** The meter itself, with the sentence that says what the number is. */
-function confidenceHtml(pos, curve) {
-  const c = confidence(pos, curve);
-  if (!c) return '';
-
-  const headline = c.belowStop
-    ? 'The price is already through your stop level.'
-    : c.pastTarget
-      ? 'The price has passed your sell target.'
-      : `Of past setups that had got this far, <strong>${Math.round(c.rate * 100)}%</strong> went on to`
-        + ` reach the target before the stop.`;
-
-  return `<div class="meter m-${c.tone}">
-    <div class="meter-top">
-      <span class="meter-label">How it is tracking</span>
-      <span class="meter-num">${c.score.toFixed(1)}<small>/10</small></span>
-    </div>
-    <div class="meter-bar"><i style="width:${c.score * 10}%"></i></div>
-    <div class="meter-say">${headline}</div>
-    <div class="meter-sub">${Math.round(c.progress * 100)}% of the way from your stop to your target
-      &middot; based on ${c.band?.decided ?? 0} past trades that reached this point</div>
-  </div>`;
-}
 /**
  * How good the price you paid was, judged against what the setup was offering.
  *
@@ -805,49 +782,6 @@ function entryRating(pos, card) {
   };
 }
 
-/** The rating block, with the numbers it was built from underneath it. */
-function entryRatingHtml(pos, stocks) {
-  const card = (stocks || []).find((s) => s.ticker === (pos.displayTicker || pos.ticker));
-  const r = entryRating(pos, card);
-  if (!r) return "";
-
-  const yours = r.yours;
-  const best = r.best;
-  const entry = r.entry;
-  const paidMore = pos.averagePrice - entry.low;
-  const where = yours.abovePct > 0
-    ? `, which is ${yours.abovePct.toFixed(1)}% above the top of the zone`
-    : `, ${Math.round(r.zonePct)}% of the way up a zone of ${price(entry.low, pos.currency)} to ${price(entry.high, pos.currency)}`;
-
-  return `<div class="rating r-${r.tone}">
-    <div class="meter-top">
-      <span class="meter-label">The price you paid</span>
-      <span class="meter-num">${r.rating.toFixed(1)}<small>/10</small></span>
-    </div>
-    <div class="meter-bar"><i style="width:${r.rating * 10}%"></i></div>
-    <div class="meter-say">${r.verdict}. You paid ${price(pos.averagePrice, pos.currency)}${where}.</div>
-    <div class="rating-grid">
-      <div><span>Stop is</span><strong>${yours.lossPct.toFixed(1)}% below</strong></div>
-      <div><span>Target is</span><strong>${yours.gainPct.toFixed(1)}% above</strong></div>
-      <div><span>Hit rate at your price</span><strong>${Math.round(yours.hitRate * 100)}%</strong></div>
-      <div><span>Average outcome</span><strong class="${yours.expectancy >= 0 ? "good-t" : "bad-t"}">${yours.expectancy >= 0 ? "+" : ""}${yours.expectancy.toFixed(1)}%</strong></div>
-    </div>
-    ${paidMore > 0.005 ? `<p class="pos-note">At the bottom of the zone, ${price(entry.low, pos.currency)}, the measured hit rate was <strong>${Math.round(best.hitRate * 100)}%</strong> against your <strong>${Math.round(yours.hitRate * 100)}%</strong>, and the stop would have sat ${best.lossPct.toFixed(1)}% away rather than ${yours.lossPct.toFixed(1)}%.</p>` : ""}
-  </div>`;
-}
-/**
- * The two scores in a single line, shown whether the detail is open or shut.
- * Collapsing a holding should hide the reasoning, never the verdict.
- */
-function posChips(pos, stocks, progressCurve) {
-  const card = (stocks || []).find((s) => s.ticker === (pos.displayTicker || pos.ticker));
-  const r = entryRating(pos, card);
-  const c = confidence(pos, progressCurve);
-  const bits = [];
-  if (r) bits.push(`<span class="chip c-${r.tone}">Your price <strong>${r.rating.toFixed(1)}</strong></span>`);
-  if (c) bits.push(`<span class="chip c-${c.tone}">Tracking <strong>${c.score.toFixed(1)}</strong></span>`);
-  return bits.length ? `<div class="pos-chips">${bits.join("")}</div>` : "";
-}
 /* ---------- rating the orders you have actually placed ---------- */
 
 /** Read the measured reward curve at any target distance, interpolating between points. */
@@ -982,92 +916,116 @@ function describeLimit(pos, plan, rewardCurve) {
     move: givingUp > 0.2 ? `Move your sell target to ${price(want, pos.currency)}.` : null,
   };
 }
-/** The stop, scored; the target, stated; and anything worth doing about either. */
-function ordersHtml(pos, stocks, rewardCurve) {
-  const plan = pos.plan;
-  if (!plan || plan.breached) return "";
-  const stop = rateStop(pos, plan);
-  const target = describeLimit(pos, plan, rewardCurve);
-  if (!stop && !target) return "";
+/**
+ * One holding, told as a story rather than a scoreboard.
+ *
+ * The card used to carry three separate marks out of ten — the price paid, how it
+ * was tracking, and the stop. They measured different things on different scales,
+ * sat in identical-looking boxes, and invited comparison that meant nothing. This
+ * answers the four questions someone actually has, in order: what is it worth,
+ * where is it between my two exits, is that going well, and is anything wrong.
+ */
 
-  const fixes = [stop?.fix, target?.move].filter(Boolean);
-  const stopCoversAll = pos.orders && pos.quantity
-    && pos.orders.stopQty >= pos.quantity - 1e-8;
+/** Where price sits between the stop and the target, drawn to scale. */
+function trackHtml(pos, plan) {
+  const now = pos.currentPrice;
+  if (!plan || plan.target == null || now == null) return "";
+  const lo = plan.stopLoss, hi = plan.target;
+  if (hi - lo <= 0) return "";
 
-  return `<div class="orders">
-    <div class="plan-head">Your orders at Trading 212</div>
+  const at = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+  const ccy = pos.currency;
 
-    ${stop ? `<div class="ord o-${stop.tone}">
-      <div class="ord-top"><span class="ord-title">Stop loss</span>
-        <span class="ord-num">${stop.score.toFixed(1)}<small>/10</small></span></div>
-      <div class="meter-bar"><i style="width:${stop.score * 10}%"></i></div>
-      <div class="ord-label">${stop.label}</div>
-      <div class="ord-detail">${stop.detail}</div>
-    </div>` : ""}
-
-    ${target ? `<div class="ord o-plain">
-      <div class="ord-top"><span class="ord-title">Sell target</span></div>
-      <div class="ord-detail">${target.text}</div>
-    </div>` : ""}
-
-    ${fixes.length ? `<ul class="fixes-list">${fixes.map((f) => `<li>${f}</li>`).join("")}</ul>`
-      : `<p class="pos-note">Nothing worth changing.</p>`}
-
-    ${stopCoversAll ? "" : `<p class="pos-note">Trading 212 will only commit a share to one
-      resting sell order, so the stop and the target cannot both cover the whole holding.
-      Give the stop the shares and take the target by hand: on past setups that cost nothing
-      &mdash; a resting stop with a manual exit averaged <strong>+2.89%</strong> a trade against
-      <strong>+2.51%</strong> with both resting, while running without a stop turned the average
-      losing trade from <strong>&minus;9.9%</strong> into <strong>&minus;15.7%</strong> and the worst
-      from &minus;26% into &minus;56%.</p>`}
-
-    <p class="pos-note">Read-only here &mdash; make any change in the app.</p>
-  </div>`;
-}
-function planHtml(pos) {
-  const plan = pos.plan;
-  if (!plan) {
-    return `<p class="pos-note">No stop or target: this is not one of the swing setups
-      the rules put levels on.</p>`;
-  }
-  if (plan.breached) {
-    return `<div class="plan breached">
-      <div class="plan-head">Exit plan</div>
-      <p class="pos-note">You paid less than the ${price(plan.stopLoss, pos.currency)} stop level,
-        so there is no 2:1 target to set from here. The setup these rules describe is
-        no longer the one you are in.</p>
-    </div>`;
-  }
-
-  return `<div class="plan">
-    <div class="plan-head">Exit plan</div>
-    <div class="plan-grid">
-      <div class="plan-stop">
-        <span>Stop loss</span>
-        <strong>${price(plan.stopLoss, pos.currency)}</strong>
-        <em>&minus;${plan.lossPct}% from what you paid${plan.lossAmount
-          ? `, about ${price(plan.lossAmount, pos.currency)}` : ''}</em>
-      </div>
-      <div class="plan-target">
-        <span>Sell target</span>
-        <strong>${price(plan.target, pos.currency)}</strong>
-        <em>+${plan.gainPct}%${plan.gainAmount
-          ? `, about ${price(plan.gainAmount, pos.currency)}` : ''}</em>
-      </div>
+  return `<div class="exitbar">
+    <div class="exitbar-line">
+      <div class="exitbar-done" style="width:${at(now)}%"></div>
+      <div class="exitbar-paid" style="left:${at(pos.averagePrice)}%"></div>
+      <div class="exitbar-now" style="left:${at(now)}%"></div>
     </div>
-    ${plan.toStopPct == null ? '' : `<p class="pos-note">From today&rsquo;s price the stop is
-      <strong>${plan.toStopPct}%</strong> below and the target <strong>${plan.toTargetPct}%</strong>
-      above.${plan.winDays ? ` Setups like this took about ${plan.winDays} trading days to reach
-      their target.` : ''}</p>`}
-    ${plan.setAt ? `<p class="pos-note">This stop is <strong>fixed</strong> at the level from when you
-      opened the position${plan.currentLevel != null && Math.abs(plan.currentLevel - plan.stopLoss) / plan.stopLoss > 0.01
-        ? `. On the latest bars the rules would put it at ${price(plan.currentLevel, pos.currency)}, but a stop
-          that moves with every scan is one that never gets hit` : ''}.</p>` : ''}
-    ${plan.needsNewHigh ? `<p class="pos-note">That target is above the recent 20-day high of
-      ${price(plan.recentHigh, pos.currency)}, so it needs a fresh high rather than a return to a
-      level already reached.</p>` : ''}
+    <div class="exitbar-ends">
+      <div class="exitbar-end"><strong class="bad-t">${price(lo, ccy)}</strong>
+        <span>sell if it falls here</span></div>
+      <div class="exitbar-mid"><strong>${price(now, ccy)}</strong>
+        <span>now &middot; paid ${price(pos.averagePrice, ccy)}</span></div>
+      <div class="exitbar-end right"><strong class="good-t">${price(hi, ccy)}</strong>
+        <span>your target</span></div>
+    </div>
   </div>`;
 }
+
+/** One sentence on how it is going, and the measured line behind it. */
+function statusHtml(pos, progressCurve) {
+  const c = confidence(pos, progressCurve);
+  if (!c) return "";
+  const pct = Math.round(c.progress * 100);
+
+  const headline = c.belowStop ? "Below your stop level"
+    : c.pastTarget ? "Past your target"
+    : pct >= 80 ? "Nearly at your target"
+    : pct >= 55 ? "Going well"
+    : pct >= 30 ? "On track"
+    : pct >= 15 ? "Drifting toward your stop"
+    : "Close to your stop";
+
+  const why = c.belowStop || c.pastTarget ? ""
+    : `${pct}% of the way from your stop to your target. Past trades that got this far`
+      + ` reached the target <strong>${Math.round(c.rate * 100)}%</strong> of the time.`;
+
+  return `<div class="status s-${c.tone}">
+    <div class="status-head">${headline}</div>
+    ${why ? `<div class="status-why">${why}</div>` : ""}
+  </div>`;
+}
+
+/** Only what is actually wrong, and nothing when nothing is. */
+function todoHtml(pos, plan, rewardCurve) {
+  if (!plan || plan.breached) return "";
+  const items = [rateStop(pos, plan)?.fix, describeLimit(pos, plan, rewardCurve)?.move].filter(Boolean);
+  return items.length
+    ? `<div class="todo">${items.map((i) => `<div class="todo-item">${i}</div>`).join("")}</div>`
+    : `<div class="todo ok">Your orders look right.</div>`;
+}
+
+/** The workings, for when you want them. */
+function holdingDetailHtml(pos, stocks, rewardCurve) {
+  const plan = pos.plan;
+  const card = (stocks || []).find((s) => s.ticker === (pos.displayTicker || pos.ticker));
+  const r = entryRating(pos, card);
+  const stop = plan ? rateStop(pos, plan) : null;
+  const target = plan ? describeLimit(pos, plan, rewardCurve) : null;
+  const stopCoversAll = pos.orders && pos.quantity && pos.orders.stopQty >= pos.quantity - 1e-8;
+
+  const facts = [
+    ["Shares", fmtQty(pos.quantity)],
+    ["You paid", price(pos.averagePrice, pos.currency)],
+    ["Now", price(pos.currentPrice, pos.currency)],
+    plan && !plan.breached ? ["If the stop hits", `&minus;${plan.lossPct}%`] : null,
+    plan && !plan.breached ? ["If the target hits", `+${plan.gainPct}%`] : null,
+    plan?.winDays ? ["Typical time to target", `${plan.winDays} trading days`] : null,
+  ].filter(Boolean);
+
+  return `<details class="more">
+    <summary><span class="more-open">Show the workings</span><span class="more-shut">Hide the workings</span></summary>
+    <div class="more-body">
+      <div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
+      ${r ? `<p class="pos-note"><strong>The price you paid.</strong> ${r.verdict}:
+        ${price(pos.averagePrice, pos.currency)} is ${Math.round(r.zonePct)}% of the way up a buy zone of
+        ${price(r.entry.low, pos.currency)} to ${price(r.entry.high, pos.currency)}. At the bottom of that
+        zone past setups worked ${Math.round(r.best.hitRate * 100)}% of the time against
+        ${Math.round(r.yours.hitRate * 100)}% at your price.</p>` : ""}
+      ${stop ? `<p class="pos-note"><strong>Your stop.</strong> ${stop.detail}. ${stop.label}.</p>` : ""}
+      ${target ? `<p class="pos-note"><strong>Your target.</strong> ${target.text}</p>` : ""}
+      ${stopCoversAll ? "" : `<p class="pos-note">Trading 212 will only commit a share to one resting
+        sell order, so the stop and the target cannot both cover everything. Give the stop the shares and
+        take the target by hand &mdash; on past setups that cost nothing: a resting stop with a manual exit
+        averaged <strong>+2.89%</strong> a trade against <strong>+2.51%</strong> with both resting, while
+        going without a stop turned the average losing trade from &minus;9.9% into &minus;15.7%.</p>`}
+      <p class="pos-note">Everything here is read-only. The dashboard never places, changes or cancels
+        an order &mdash; that is yours to do in the app.</p>
+    </div>
+  </details>`;
+}
+
 function portfolioHtml(p, progressCurve, stocks, rewardCurve) {
   if (!p) return '<p class="no-news">Run a scan to load your portfolio.</p>';
   if (!p.available) {
@@ -1079,24 +1037,17 @@ function portfolioHtml(p, progressCurve, stocks, rewardCurve) {
   }
 
   const ccy = p.currency;
-  const c = p.cash;
+  const cash = p.cash;
   const totalPpl = p.positions.reduce((s, x) => s + (x.ppl ?? 0) + (x.fxPpl ?? 0), 0);
 
-  const skipped = '';
-
-  const summary = `<div class="entry">
-    <div class="entry-head">Account
-      <span class="pill ${totalPpl >= 0 ? 'in' : 'wait'}">${signed(totalPpl, ccy)} overall</span>
+  const summary = `<div class="acct">
+    <div class="acct-main">
+      <span class="acct-label">Your account</span>
+      <span class="acct-value">${money(cash?.total, ccy)}</span>
+      <span class="acct-pl ${totalPpl >= 0 ? "up" : "down"}">${signed(totalPpl, ccy)} overall</span>
     </div>
-    <div class="entry-grid">
-      <div><span>Total value</span><strong>${money(c?.total, ccy)}</strong></div>
-      <div><span>Invested</span><strong>${money(c?.invested, ccy)}</strong></div>
-      <div><span>Available cash</span><strong>${money(c?.free, ccy)}</strong></div>
-      <div><span>Positions</span><strong>${p.positions.length}</strong></div>
-    </div>
-    ${skipped}
-    <p class="entry-note">${esc(p.accountType === 'demo' ? 'Practice account.' : 'Live account.')}
-      Every figure here comes straight from Trading 212 as of the last scan.</p>
+    <div class="acct-sub">${p.positions.length} holding${p.positions.length === 1 ? "" : "s"}
+      &middot; ${money(cash?.free, ccy)} cash &middot; ${esc(p.accountType === "demo" ? "practice" : "live")} account</div>
   </div>`;
 
   const totalValue = p.positions.reduce((s, x) => s + (x.valueAccount ?? 0), 0);
@@ -1104,10 +1055,8 @@ function portfolioHtml(p, progressCurve, stocks, rewardCurve) {
   const rows = p.positions.map((pos) => {
     const up = (pos.ppl ?? 0) >= 0;
     const share = totalValue && pos.valueAccount ? (pos.valueAccount / totalValue) * 100 : null;
-    const tags = [
-      pos.onWatchlist ? `<span class="tag">${esc(pos.category)} &middot; scored ${pos.score}</span>` : '',
-      pos.pieQuantity ? '<span class="tag">part of a pie</span>' : '',
-    ].filter(Boolean).join(' ');
+    const plan = pos.plan;
+    const swing = plan && !plan.breached;
 
     return `<article class="card pos">
       <div class="pos-top">
@@ -1117,41 +1066,25 @@ function portfolioHtml(p, progressCurve, stocks, rewardCurve) {
         </div>
         <div class="pos-money">
           <div class="pos-value">${money(pos.valueAccount, ccy)}</div>
-          <div class="pos-pl ${up ? 'up' : 'down'}">
-            ${signed(pos.ppl, ccy)}${pos.pplPct == null ? '' : ` &middot; ${pos.pplPct >= 0 ? '+' : ''}${pos.pplPct}%`}
+          <div class="pos-pl ${up ? "up" : "down"}">
+            ${signed(pos.ppl, ccy)}${pos.pplPct == null ? "" : ` &middot; ${pos.pplPct >= 0 ? "+" : ""}${pos.pplPct}%`}
           </div>
         </div>
       </div>
-
-      ${share != null ? `<div class="pos-bar" title="${share.toFixed(0)}% of your holdings">
-        <div class="pos-bar-fill" style="width:${share.toFixed(1)}%"></div>
-      </div>
-      <div class="pos-share">${share.toFixed(0)}% of your holdings</div>` : ''}
-
-      <div class="pos-facts">
-        <div><span>Shares</span><strong>${fmtQty(pos.quantity)}</strong></div>
-        <div><span>You paid</span><strong>${price(pos.averagePrice, pos.currency)}</strong></div>
-        <div><span>Now</span><strong>${price(pos.currentPrice, pos.currency)}</strong></div>
-      </div>
-      ${posChips(pos, stocks, progressCurve)}
-      <details class="more">
-        <summary><span class="more-open">Show detail</span><span class="more-shut">Hide detail</span></summary>
-        <div class="more-body">
-          ${entryRatingHtml(pos, stocks)}
-          ${confidenceHtml(pos, progressCurve)}
-          ${planHtml(pos)}
-          ${ordersHtml(pos, stocks, rewardCurve)}
-        </div>
-      </details>
-      ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
+      ${share != null ? `<div class="pos-share">${share.toFixed(0)}% of your holdings</div>` : ""}
+      ${swing
+        ? `${trackHtml(pos, plan)}${statusHtml(pos, progressCurve)}
+           ${todoHtml(pos, plan, rewardCurve)}${holdingDetailHtml(pos, stocks, rewardCurve)}`
+        : `<div class="status s-plain">
+             <div class="status-head">Long-term holding</div>
+             <div class="status-why">No stop or target: this is not one of the swing setups the rules
+               put levels on, so there is nothing to track it against.</div>
+           </div>`}
     </article>`;
-  }).join('');
+  }).join("");
 
-  return summary + healthHtml(p.health) + rows +
-    `<p class="foot">Share prices are in each holding&rsquo;s own currency; values and
-      profit or loss are converted to ${esc(ccy || 'your account currency')}.</p>`;
+  return summary + healthHtml(p.health) + rows;
 }
-
 /**
  * Last and next scan. The next one is only meaningful on the published build,
  * which runs to a schedule; locally scans happen when you press the button.
