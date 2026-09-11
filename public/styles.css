@@ -336,3 +336,18 @@ details.hc[open] > summary::before { content: "▾ "; }
   color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
 }
 .stamp-dim { color: var(--muted); }
+
+/* ---------- track record strip ---------- */
+.track {
+  margin-top: 10px; padding: 11px 12px; border-radius: 9px;
+  border-left: 3px solid var(--muted); background: var(--card-2);
+}
+.track.in   { border-left-color: var(--good); }
+.track.wait { border-left-color: var(--ok); }
+.track.hot  { border-left-color: var(--bad); }
+.track-main { font-size: 0.84rem; line-height: 1.45; }
+.track-main strong { font-size: 1rem; }
+.track.in .track-main strong   { color: var(--good); }
+.track.wait .track-main strong { color: var(--ok); }
+.track.hot .track-main strong  { color: var(--bad); }
+.track-sub { margin-top: 4px; color: var(--muted); font-size: 0.74rem; line-height: 1.4; }

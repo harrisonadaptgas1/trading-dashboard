@@ -40,6 +40,33 @@ function nextScanAfter(from = new Date()) {
   return null;
 }
 
+/**
+ * Whether the US market is open, and if not, when it next opens. Prices only
+ * move while it trades, so "prices unchanged" after a scan is expected outside
+ * those hours — and saying so is far more use than stating the fact alone.
+ */
+function usMarketState(now = new Date()) {
+  // Read the London parts directly. Round-tripping through toLocaleString and
+  // back into new Date() misparses "12/09/2026" as 9 December, which silently
+  // breaks the weekday check.
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London', weekday: 'short',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(now).map((p) => [p.type, p.value])
+  );
+  const mins = Number(parts.hour) * 60 + Number(parts.minute);
+  const OPEN = 14 * 60 + 30;   // 14:30 UK
+  const CLOSE = 21 * 60;       // 21:00 UK
+
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') {
+    return { open: false, reason: 'markets are closed at the weekend' };
+  }
+  if (mins < OPEN) return { open: false, reason: 'US markets open at 14:30 UK' };
+  if (mins >= CLOSE) return { open: false, reason: 'US markets closed at 21:00 UK' };
+  return { open: true, reason: null };
+}
+
 /** "in 12 minutes", "in 2 hours" — a sense of how fresh the next one is. */
 function untilText(date) {
   const mins = Math.round((date - Date.now()) / 60000);
@@ -220,6 +247,35 @@ function analystHtml(a) {
   </div>`;
 }
 
+/**
+ * One-line track record, shown on the collapsed card. This is the closest
+ * honest answer to "how likely is this to work", so it should not be hidden
+ * behind a toggle — but it is a measured past hit rate, never a prediction.
+ */
+function trackRecordHtml(b) {
+  if (!b || b.hitRate == null) return '';
+  const pct = Math.round(b.hitRate * 100);
+  const ev = b.expectancyPct;
+  const tone = ev == null ? 'wait' : ev > 1 ? 'in' : ev > 0 ? 'wait' : 'hot';
+
+  const verdict = ev == null ? 'no current setup to price'
+    : ev > 1 ? 'made money on average'
+    : ev > 0 ? 'about broke even'
+    : 'lost money on average';
+
+  return `<div class="track ${tone}">
+    <div class="track-main">
+      <strong>${pct}%</strong> of the last ${b.wins + b.losses} setups reached the target
+      before the stop${ev == null ? '' : `, and ${esc(verdict)}`}
+    </div>
+    <div class="track-sub">
+      ${ev == null ? '' : `<span class="${ev >= 0 ? 'good-t' : 'bad-t'}">${ev >= 0 ? '+' : ''}${ev}% average per setup</span> · `}
+      ${b.occurrences} in 2 years · typically held ${b.avgBarsHeld} days
+      ${!b.reliable ? ' · <strong>small sample</strong>' : ''}
+    </div>
+  </div>`;
+}
+
 /** Which of our criteria this stock meets, shown as plain ticks and crosses. */
 function checklistHtml(c) {
   if (!c) return '';
@@ -289,6 +345,7 @@ function cardHtml(s, { collapsible = false } = {}) {
     <p class="reason">${esc(s.reason)}</p>
     ${warnings}
     ${entryHtml(s.entry, { withNotes: !collapsible })}
+    ${collapsible ? trackRecordHtml(s.backtest) : ''}
     ${collapsible
       // Collapsed, a card shows only what you need to judge it at a glance:
       // score, price, why, and the levels. Everything else is one tap away.
@@ -569,9 +626,17 @@ async function runScanLocally() {
 
     const data = await fetchPayload();
     render(data);
-    status(data.dataAsOf === previousAsOf
-      ? `Updated in ${body.seconds}s. News refreshed; prices unchanged (still the ${data.dataAsOf} close).`
-      : `Updated in ${body.seconds}s. Prices now to ${data.dataAsOf}.`, 'ok');
+
+    if (data.dataAsOf !== previousAsOf) {
+      status(`Updated in ${body.seconds}s. Prices now to ${data.dataAsOf}.`, 'ok');
+    } else {
+      const market = usMarketState();
+      status(`Scanned in ${body.seconds}s — news and scores refreshed. `
+        + (market.open
+          ? 'Prices are unchanged since the last scan.'
+          : `Prices cannot change yet: ${market.reason}, so the ${data.dataAsOf} close is still the latest there is.`),
+      'ok');
+    }
   } catch (e) {
     status(e.message, 'err');
   } finally {
