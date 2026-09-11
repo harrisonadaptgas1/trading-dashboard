@@ -159,6 +159,23 @@ export function computeEntry(closes, highs, lows) {
   // letting a zone-based percentage be read as today's risk.
   const stopFromTodayPct = Number((((price - breaksBelow) / price) * 100).toFixed(1));
 
+  // Where you buy inside the zone is the biggest single lever on the trade:
+  // the bottom can be two or three times the reward-per-unit-risk of the top.
+  // Showing only the midpoint makes the range look like vagueness rather than
+  // a gradient, so hand the UI all three points.
+  const ladder = [['Bottom', low], ['Middle', (low + high) / 2], ['Top', high]]
+    .map(([label, p]) => {
+      const gain = ((exit - p) / p) * 100;
+      const loss = ((p - breaksBelow) / p) * 100;
+      return {
+        label,
+        price: round(p),
+        gainPct: Number(gain.toFixed(1)),
+        lossPct: Number(loss.toFixed(1)),
+        rewardRisk: loss > 0 ? Number((gain / loss).toFixed(1)) : null,
+      };
+    });
+
   const note = `${context} ${inZone
     ? 'Today’s price sits inside that zone.'
     : 'Reaching the zone would mean waiting for a dip.'} The exit level is ${exitBasis}.` +
@@ -176,6 +193,7 @@ export function computeEntry(closes, highs, lows) {
     fallToZonePct: inZone ? 0 : Number((((price - high) / price) * 100).toFixed(1)),
     riskPct: Number((((high - breaksBelow) / high) * 100).toFixed(1)),
     stopFromTodayPct,
+    ladder,
     // Gain from the middle of the zone to the exit, as a percentage.
     rewardPct: Number((((exit - mid) / mid) * 100).toFixed(1)),
     rewardRisk: rewardRisk == null ? null : Number(rewardRisk.toFixed(1)),

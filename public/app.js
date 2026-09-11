@@ -114,6 +114,33 @@ function sparkline(values) {
  * Entry levels. Deliberately framed as levels the rules flag, with the arithmetic
  * shown, rather than as a recommendation to buy at a price.
  */
+/**
+ * What you actually get depending on where in the zone you buy. The spread
+ * between bottom and top is usually two to three times the reward per unit of
+ * risk, which makes this the most consequential number on the card.
+ */
+function ladderHtml(e) {
+  if (!e?.ladder?.length) return '';
+  const best = Math.max(...e.ladder.map((r) => r.rewardRisk ?? 0));
+
+  const rows = e.ladder.map((r) => {
+    const tone = r.rewardRisk >= 2 ? 'good-t' : r.rewardRisk >= 1.5 ? '' : 'bad-t';
+    return `<div class="ladder-row${r.rewardRisk === best ? ' best' : ''}">
+      <span class="ladder-price">$${r.price}</span>
+      <span class="ladder-bar"><i style="width:${Math.min(100, (r.rewardRisk / best) * 100)}%"></i></span>
+      <strong class="${tone}">${r.rewardRisk == null ? '—' : `${r.rewardRisk} : 1`}</strong>
+    </div>`;
+  }).join('');
+
+  return `<div class="ladder">
+    <div class="ladder-head">What you get depending on where you buy</div>
+    ${rows}
+    <p class="entry-note">Same exit and stop throughout — only the price you pay changes.
+      Buying at the bottom of the zone is a materially better trade than the top,
+      which is the point of showing a range rather than one number.</p>
+  </div>`;
+}
+
 /** The wordy part of the entry block, split out so a card can collapse it. */
 function entryNotesHtml(e) {
   if (!e || e.status === 'none') return '';
@@ -148,6 +175,7 @@ function entryHtml(e, { withNotes = true } = {}) {
       <div><span>Gain if it reaches the exit</span><strong class="good-t">+${e.rewardPct}%</strong></div>
       <div><span>Loss if the stop is hit</span><strong class="bad-t">&minus;${e.riskPct}%</strong></div>
     </div>
+    ${ladderHtml(e)}
     ${withNotes ? entryNotesHtml(e) : ''}
   </div>`;
 }
