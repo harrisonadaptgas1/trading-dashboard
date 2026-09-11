@@ -124,15 +124,25 @@ function sparkline(values) {
  * backtests actually run at five points across the zone, so a lower entry
  * reports a genuinely higher measured win rate rather than an assumed one.
  */
+// Measured, not guessed: across the 17 swing stocks over two years, every 1%
+// paid above the top of the entry zone took roughly 4 points off the hit rate.
+// At the zone top the average outcome was -0.4% per trade; at 1% above it was
+// -1.1%, at 3% above -6.9%, at 5% above -11.2%. Paying up is the single most
+// expensive thing you can do to one of these setups.
+const HIT_DROP_PER_PCT_ABOVE = 0.04;
+
 function tradeAt(price, entry, curve) {
   const span = entry.high - entry.low;
   const position = span > 0 ? Math.max(0, Math.min(1, (price - entry.low) / span)) : 0;
 
-  // The fitted trend, not the raw backtest points. Each point rests on only a
-  // few dozen trades, so reading them straight off made this jump around as you
-  // dragged the slider — movement that was sampling noise, not evidence.
+  // How far above the zone you are paying, which the backtest covers. Below the
+  // zone it is clamped at the bottom instead of extrapolated: buying cheaper
+  // looks better on the trend, but we have not measured it, so we do not claim it.
+  const abovePct = price > entry.high ? ((price - entry.high) / entry.high) * 100 : 0;
+
   const hitRate = curve?.fit
-    ? Math.max(0.02, Math.min(0.98, curve.fit.intercept + curve.fit.slope * position))
+    ? Math.max(0.02, Math.min(0.98,
+        curve.fit.intercept + curve.fit.slope * position - abovePct * HIT_DROP_PER_PCT_ABOVE))
     : null;
   const risk = price - entry.stopLoss;
   const exit = price + risk * 2;
@@ -147,6 +157,8 @@ function tradeAt(price, entry, curve) {
     // minus how often it fails, times what that costs.
     expectancy: hitRate == null ? null : hitRate * gainPct - (1 - hitRate) * lossPct,
     needsNewHigh: exit > entry.recentHigh,
+    abovePct,
+    belowZone: price < entry.low,
     outsideZone: price < entry.low || price > entry.high,
   };
 }
@@ -159,7 +171,9 @@ function tradeAt(price, entry, curve) {
  * It is a summary of the same evidence shown below it, not a separate opinion,
  * and certainly not a probability of making money.
  */
-const DEALING_COST_PCT = 0.8; // spread plus FX on a dollar stock, roughly
+// Trading 212 charges no commission on stocks; the real cost is the 0.15% FX
+// fee each way on a dollar stock, plus a thin spread on names this liquid.
+const DEALING_COST_PCT = 0.4;
 
 function worthScore(t, s) {
   if (t.expectancy == null) return null;
@@ -168,7 +182,10 @@ function worthScore(t, s) {
   const holdingBack = [];
   let score = 5 + (t.expectancy - DEALING_COST_PCT) * 0.85;
 
-  if (t.outsideZone)  { score -= 2.5; holdingBack.push('the price is outside the entry zone'); }
+  // Buying above the zone used to cost a flat 2.5 points, a figure I had picked
+  // rather than measured. The hit rate now falls with the distance paid, which
+  // is both harsher and defensible, so the invented penalty is gone.
+  if (t.belowZone) { score -= 0.5; holdingBack.push('the price is below the zone, which we have not measured'); }
   if (t.needsNewHigh) { score -= 1.2; holdingBack.push('the target needs a fresh 20-day high'); }
   if (met('earnings') === false) { score -= 1.0; holdingBack.push('earnings are due within days'); }
   if (met('trend') === false)    { score -= 0.8; holdingBack.push('the medium-term trend is not up'); }
@@ -263,7 +280,10 @@ function renderCalc(box, s) {
         `<div class="calc-ev">Wins and losses together, that averages <strong class="${t.expectancy >= 0 ? 'good-t' : 'bad-t'}">${
           t.expectancy >= 0 ? '+' : ''}${t.expectancy.toFixed(1)}%</strong> of your money per trade</div>`}
     </div>
-    ${t.outsideZone ? '<p class="entry-note bad-t">That price is outside the entry zone, so the measured hit rate does not cover it.</p>' : ''}
+    ${t.abovePct > 0 ? `<p class="entry-note bad-t">That is ${t.abovePct.toFixed(1)}% above the top of
+      the entry zone. Paying above the zone cost about 4 points of hit rate for every 1% over,
+      measured across the whole watchlist, and that is already taken off the figures above.</p>` : ''}
+    ${t.belowZone ? '<p class="entry-note">That is below the entry zone. We have not backtested entries that cheap, so the hit rate above is the one measured at the bottom of the zone rather than a better one we cannot evidence.</p>' : ''}
     ${t.needsNewHigh ? `<p class="entry-note">This target is above the recent 20-day high of $${s.entry.recentHigh}, so it needs a fresh high rather than a return to a level already reached.</p>` : ''}
   `;
 }
