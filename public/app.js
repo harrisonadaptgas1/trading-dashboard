@@ -736,6 +736,85 @@ function confidenceHtml(pos, curve) {
       &middot; based on ${c.band?.decided ?? 0} past trades that reached this point</div>
   </div>`;
 }
+/**
+ * How good the price you paid was, judged against what the setup was offering.
+ *
+ * Reward-to-risk is fixed at 2:1 by the way the target is set, so that ratio says
+ * nothing about your fill. What does vary is where in the entry zone you bought,
+ * and we have measured what that costs: the hit rate falls steadily from the
+ * bottom of the zone to the top, and keeps falling above it.
+ *
+ * So this rates execution, not the stock. The bottom of the zone scores 10, the
+ * top scores 3, and paying above the zone scores below that. A good mark here on
+ * a weak setup is still a weak trade, which is why the numbers behind it are
+ * shown rather than just the rating.
+ */
+function entryRating(pos, card) {
+  const plan = pos.plan;
+  if (!card || !card.entry || card.entry.status === "none" || !card.entryCurve) return null;
+  if (!card.entryCurve.fit) return null;
+  if (pos.averagePrice == null || (plan && plan.breached)) return null;
+
+  // Judge against the stop you are actually holding to, so this agrees with the
+  // exit plan above it rather than quoting a level from some later scan.
+  const entry = { ...card.entry, stopLoss: (plan && plan.stopLoss) || card.entry.stopLoss };
+  const yours = tradeAt(pos.averagePrice, entry, card.entryCurve);
+  const best = tradeAt(entry.low, entry, card.entryCurve);
+  const worst = tradeAt(entry.high, entry, card.entryCurve);
+  if (yours.hitRate == null || best.hitRate == null || worst.hitRate == null) return null;
+
+  const spread = best.hitRate - worst.hitRate;
+  const rating = spread > 0
+    ? Math.max(0, Math.min(10, 3 + 7 * ((yours.hitRate - worst.hitRate) / spread)))
+    : 5;
+
+  const zonePct = entry.high > entry.low
+    ? ((pos.averagePrice - entry.low) / (entry.high - entry.low)) * 100
+    : 0;
+
+  const verdict =
+    rating >= 8.5 ? "About the best price this setup was offering"
+    : rating >= 7 ? "A good price within the zone"
+    : rating >= 5 ? "Middling &mdash; you paid up a little"
+    : rating >= 3 ? "Near the expensive end of the zone"
+    : "Above the price the rules wanted to pay";
+
+  return {
+    rating, verdict, yours, best, entry, zonePct,
+    tone: rating >= 7 ? "good" : rating >= 4 ? "mid" : "bad",
+  };
+}
+
+/** The rating block, with the numbers it was built from underneath it. */
+function entryRatingHtml(pos, stocks) {
+  const card = (stocks || []).find((s) => s.ticker === (pos.displayTicker || pos.ticker));
+  const r = entryRating(pos, card);
+  if (!r) return "";
+
+  const yours = r.yours;
+  const best = r.best;
+  const entry = r.entry;
+  const paidMore = pos.averagePrice - entry.low;
+  const where = yours.abovePct > 0
+    ? `, which is ${yours.abovePct.toFixed(1)}% above the top of the zone`
+    : `, ${Math.round(r.zonePct)}% of the way up a zone of ${price(entry.low, pos.currency)} to ${price(entry.high, pos.currency)}`;
+
+  return `<div class="rating r-${r.tone}">
+    <div class="meter-top">
+      <span class="meter-label">The price you paid</span>
+      <span class="meter-num">${r.rating.toFixed(1)}<small>/10</small></span>
+    </div>
+    <div class="meter-bar"><i style="width:${r.rating * 10}%"></i></div>
+    <div class="meter-say">${r.verdict}. You paid ${price(pos.averagePrice, pos.currency)}${where}.</div>
+    <div class="rating-grid">
+      <div><span>Stop is</span><strong>${yours.lossPct.toFixed(1)}% below</strong></div>
+      <div><span>Target is</span><strong>${yours.gainPct.toFixed(1)}% above</strong></div>
+      <div><span>Hit rate at your price</span><strong>${Math.round(yours.hitRate * 100)}%</strong></div>
+      <div><span>Average outcome</span><strong class="${yours.expectancy >= 0 ? "good-t" : "bad-t"}">${yours.expectancy >= 0 ? "+" : ""}${yours.expectancy.toFixed(1)}%</strong></div>
+    </div>
+    ${paidMore > 0.005 ? `<p class="pos-note">At the bottom of the zone, ${price(entry.low, pos.currency)}, the measured hit rate was <strong>${Math.round(best.hitRate * 100)}%</strong> against your <strong>${Math.round(yours.hitRate * 100)}%</strong>, and the stop would have sat ${best.lossPct.toFixed(1)}% away rather than ${yours.lossPct.toFixed(1)}%.</p>` : ""}
+  </div>`;
+}
 function planHtml(pos) {
   const plan = pos.plan;
   if (!plan) {
@@ -780,7 +859,7 @@ function planHtml(pos) {
       level already reached.</p>` : ''}
   </div>`;
 }
-function portfolioHtml(p, progressCurve) {
+function portfolioHtml(p, progressCurve, stocks) {
   if (!p) return '<p class="no-news">Run a scan to load your portfolio.</p>';
   if (!p.available) {
     return `<div class="entry none"><div class="entry-head">Portfolio</div>
@@ -845,6 +924,7 @@ function portfolioHtml(p, progressCurve) {
         <div><span>You paid</span><strong>${price(pos.averagePrice, pos.currency)}</strong></div>
         <div><span>Now</span><strong>${price(pos.currentPrice, pos.currency)}</strong></div>
       </div>
+      ${entryRatingHtml(pos, stocks)}
       ${confidenceHtml(pos, progressCurve)}
       ${planHtml(pos)}
       ${tags ? `<div class="pos-tags">${tags}</div>` : ''}
@@ -911,7 +991,7 @@ function render(data) {
     : '';
   $('swing-cards').innerHTML = orderNote + (byWorthNow(data.swingTerm)
     .map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>');
-  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio, data.progressCurve);
+  $('portfolio-body').innerHTML = portfolioHtml(data.portfolio, data.progressCurve, [...(data.longTerm ?? []), ...(data.swingTerm ?? [])]);
   refreshCalcs();
 
   renderStamp(data);
