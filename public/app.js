@@ -209,25 +209,32 @@ function worthHtml(w) {
 function calculatorHtml(s) {
   const e = s.entry;
   if (!e || e.status === 'none' || !s.entryCurve) return '';
-  const start = Number(((e.low + e.high) / 2).toFixed(2));
-  const step = e.high - e.low > 20 ? 1 : e.high - e.low > 2 ? 0.1 : 0.01;
+
+  // Start at what the stock actually costs right now, so the card opens on the
+  // question you are really asking. The slider stretches to cover today's price
+  // when that sits outside the zone, which is most of the "wait" setups.
+  const lo = Math.min(e.low, s.price);
+  const hi = Math.max(e.high, s.price);
+  const start = Number(s.price.toFixed(2));
+  const step = hi - lo > 20 ? 1 : hi - lo > 2 ? 0.1 : 0.01;
 
   return `<div class="calc" data-ticker="${esc(s.ticker)}">
     <div class="calc-head">Try a price</div>
-    <p class="calc-hint">Type a price, or drag the slider between $${e.low} and $${e.high}, to see what that entry would mean.</p>
+    <p class="calc-hint">Starts at today&rsquo;s price of $${start}. Type another, or drag
+       the slider, to see what a different entry would mean. The entry zone is
+       $${e.low} &ndash; $${e.high}.</p>
     <div class="calc-input">
       <span class="calc-currency">$</span>
       <input type="number" class="calc-price" value="${start}"
-             min="${e.low}" max="${e.high}" step="${step}"
+             min="${lo}" max="${hi}" step="${step}"
              inputmode="decimal" aria-label="Entry price for ${esc(s.ticker)}">
       <input type="range" class="calc-slider"
-             min="${e.low}" max="${e.high}" step="${step}" value="${start}"
+             min="${lo}" max="${hi}" step="any" value="${start}"
              aria-label="Entry price slider for ${esc(s.ticker)}">
     </div>
     <div class="calc-out"></div>
   </div>`;
 }
-
 /** Fill in one calculator's output for the price currently entered. */
 function renderCalc(box, s) {
   const price = Number(box.querySelector('.calc-price').value);
@@ -451,14 +458,15 @@ function checklistHtml(c) {
  * recommendation: it says what matched, and nothing about what will happen.
  */
 function shortlistHtml(swing) {
-  const all = swing.filter((s) => s.checklist?.all);
+  const all = byWorthNow(swing.filter((s) => s.checklist?.all));
   const near = swing.filter((s) => s.checklist && !s.checklist.all)
     .sort((a, b) => b.checklist.met - a.checklist.met).slice(0, 3);
 
   const body = all.length
     ? all.map((s) => `<div class="short-row">
         <strong>${esc(s.ticker)}</strong>
-        <span>${s.score}/10 &middot; ${esc(s.risk.level.toLowerCase())} risk &middot; ${s.entry.rewardRisk}:1 reward vs risk</span>
+        <span>${worthNow(s) == null ? '&mdash;' : worthNow(s).toFixed(1) + '/10 at today&rsquo;s price'}
+          &middot; ${esc(s.risk.level.toLowerCase())} risk &middot; ${s.entry.rewardRisk}:1 reward vs risk</span>
       </div>`).join('')
     : `<p class="entry-note" style="margin-top:0">Nothing meets all six today. Closest:
         ${near.map((s) => `${esc(s.ticker)} (${s.checklist.met}/6)`).join(', ')}.</p>`;
@@ -677,11 +685,39 @@ function renderStamp(data) {
   $('stamp').innerHTML = rows.map((r) => `<div>${r}</div>`).join('');
 }
 
+/**
+ * The worth-it score at today's price. This is what the swing cards are ranked
+ * by: the question "what is worth buying right now" is answered by what the
+ * stock costs today, not by where its zone happens to sit.
+ */
+function worthNow(s) {
+  if (!s.entry || s.entry.status === 'none' || !s.entryCurve) return null;
+  return worthScore(tradeAt(s.price, s.entry, s.entryCurve), s)?.score ?? null;
+}
+
+/** Best score first; setups with no levels to judge sit at the bottom. */
+function byWorthNow(list) {
+  return [...list].sort((a, b) => {
+    const wa = worthNow(a), wb = worthNow(b);
+    if (wa == null && wb == null) return b.score - a.score;
+    if (wa == null) return 1;
+    if (wb == null) return -1;
+    return wb - wa;
+  });
+}
 function render(data) {
   current = data;
   $('long-cards').innerHTML = data.longTerm.map(cardHtml).join('') || '<p class="no-news">No long-term results.</p>';
   $('swing-shortlist').innerHTML = data.swingTerm.length ? shortlistHtml(data.swingTerm) : '';
-  $('swing-cards').innerHTML = data.swingTerm.map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>';
+  // The badge on each card is the stock's own score against our rules, which is
+  // not what the list is ordered by. Saying so stops the order looking wrong.
+  const orderNote = data.swingTerm.length
+    ? `<p class="order-note">Ordered by what buying at today&rsquo;s price is worth, best first.
+       The number on each card is that stock&rsquo;s own score against our rules &mdash; a
+       separate thing, and not what this list is sorted by.</p>`
+    : '';
+  $('swing-cards').innerHTML = orderNote + (byWorthNow(data.swingTerm)
+    .map((x) => cardHtml(x, { collapsible: true })).join('') || '<p class="no-news">No swing-term results.</p>');
   $('portfolio-body').innerHTML = portfolioHtml(data.portfolio);
   refreshCalcs();
 
@@ -971,7 +1007,10 @@ function refreshCalcs() {
 $('swing-cards').addEventListener('input', (e) => {
   const box = e.target.closest('.calc');
   if (!box) return;
-  const price = e.target.value;
+  // The slider moves freely, so round what it reports before it becomes a price.
+  const price = e.target.classList.contains('calc-slider')
+    ? Number(e.target.value).toFixed(2)
+    : e.target.value;
   // Keep the number field and the slider in step with each other.
   box.querySelectorAll('.calc-price, .calc-slider').forEach((el) => { el.value = price; });
   const s = stockByTicker(box.dataset.ticker);

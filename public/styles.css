@@ -412,3 +412,8 @@ details.hc[open] > summary::before { content: "▾ "; }
 .w-mid  .worth-bar i { background: var(--ok); }
 .w-bad  .worth-bar i { background: var(--bad); }
 .worth-say { font-size: 0.8rem; line-height: 1.45; color: var(--text); }
+
+.order-note {
+  color: var(--muted); font-size: 0.78rem; line-height: 1.45;
+  margin: 0 0 12px; padding: 0 2px;
+}
