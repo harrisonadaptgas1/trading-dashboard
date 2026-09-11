@@ -385,3 +385,30 @@ details.hc[open] > summary::before { content: "▾ "; }
 .calc-verdict.hot  { border-left-color: var(--bad); }
 .calc-verdict > strong { font-size: 1.05rem; }
 .calc-ev { margin-top: 4px; color: var(--muted); font-size: 0.78rem; }
+
+/* ---------- worth-it score ---------- */
+.worth {
+  padding: 11px 13px; border-radius: 9px; background: var(--card-2);
+  border-left: 3px solid var(--muted); margin-bottom: 11px;
+}
+.worth.w-good { border-left-color: var(--good); }
+.worth.w-mid  { border-left-color: var(--ok); }
+.worth.w-bad  { border-left-color: var(--bad); }
+.worth-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.worth-label {
+  color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.worth-num { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.worth-num small { font-size: 0.8rem; font-weight: 500; color: var(--muted); margin-left: 1px; }
+.w-good .worth-num { color: var(--good); }
+.w-mid  .worth-num { color: var(--ok); }
+.w-bad  .worth-num { color: var(--bad); }
+.worth-bar {
+  height: 6px; border-radius: 99px; background: var(--line);
+  margin: 8px 0 7px; overflow: hidden;
+}
+.worth-bar i { display: block; height: 100%; border-radius: 99px; transition: width 0.12s linear; }
+.w-good .worth-bar i { background: var(--good); }
+.w-mid  .worth-bar i { background: var(--ok); }
+.w-bad  .worth-bar i { background: var(--bad); }
+.worth-say { font-size: 0.8rem; line-height: 1.45; color: var(--text); }

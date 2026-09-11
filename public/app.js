@@ -151,6 +151,60 @@ function tradeAt(price, entry, curve) {
   };
 }
 
+/**
+ * A single 0-10 read on how well one entry price stacks up against our rules.
+ *
+ * It starts from the average outcome at that price, after allowing for what
+ * dealing actually costs, then docks points for the things that spoil a setup.
+ * It is a summary of the same evidence shown below it, not a separate opinion,
+ * and certainly not a probability of making money.
+ */
+const DEALING_COST_PCT = 0.8; // spread plus FX on a dollar stock, roughly
+
+function worthScore(t, s) {
+  if (t.expectancy == null) return null;
+
+  const met = (fragment) => s.checklist?.items.find((i) => i.label.includes(fragment))?.met;
+  const holdingBack = [];
+  let score = 5 + (t.expectancy - DEALING_COST_PCT) * 0.85;
+
+  if (t.outsideZone)  { score -= 2.5; holdingBack.push('the price is outside the entry zone'); }
+  if (t.needsNewHigh) { score -= 1.2; holdingBack.push('the target needs a fresh 20-day high'); }
+  if (met('earnings') === false) { score -= 1.0; holdingBack.push('earnings are due within days'); }
+  if (met('trend') === false)    { score -= 0.8; holdingBack.push('the medium-term trend is not up'); }
+  if (s.risk?.level === 'High')  { score -= 0.6; holdingBack.push('this is a high-risk stock'); }
+  score += (s.score - 6) * 0.25; // the stock's own score, gently
+
+  // Thin evidence should not produce confident-looking extremes, so pull the
+  // result back toward the middle when there are few past trades behind it.
+  if ((s.entryCurve?.trades?.min ?? 99) < 15) score = 5 + (score - 5) * 0.85;
+
+  score = Math.max(0, Math.min(10, score));
+  const verdict =
+    score >= 8.5 ? 'About as well as a setup on this list ever scores'
+    : score >= 7  ? 'Stacks up well against our rules'
+    : score >= 5.5 ? 'Reasonable, without being one of the better ones'
+    : score >= 4  ? 'Marginal &mdash; the odds barely cover the dealing costs'
+    : score >= 2.5 ? 'Weak against our rules'
+    : 'Our rules do not support this price';
+
+  return { score, verdict, holdingBack, tone: score >= 7 ? 'good' : score >= 4.5 ? 'mid' : 'bad' };
+}
+
+/** The worth-it block: the headline number, a bar, and what is dragging it down. */
+function worthHtml(w) {
+  if (!w) return '';
+  return `<div class="worth w-${w.tone}">
+    <div class="worth-top">
+      <span class="worth-label">Worth it?</span>
+      <span class="worth-num">${w.score.toFixed(1)}<small>/10</small></span>
+    </div>
+    <div class="worth-bar"><i style="width:${w.score * 10}%"></i></div>
+    <div class="worth-say">${w.verdict}.${w.holdingBack.length
+      ? ` Held back because ${w.holdingBack.join(', and ')}.`
+      : ''}</div>
+  </div>`;
+}
 /** The per-card calculator. Rendered once; the numbers update as you type. */
 function calculatorHtml(s) {
   const e = s.entry;
@@ -185,6 +239,7 @@ function renderCalc(box, s) {
   const tone = t.expectancy == null ? '' : t.expectancy > 1 ? 'in' : t.expectancy > 0 ? 'wait' : 'hot';
 
   out.innerHTML = `
+    ${worthHtml(worthScore(t, s))}
     <div class="calc-grid">
       <div><span>Stop loss</span><strong class="bad-t">$${t.stop.toFixed(2)}</strong></div>
       <div><span>Exit target</span><strong class="good-t">$${t.exit.toFixed(2)}</strong></div>
