@@ -74,18 +74,38 @@ async function getLivePrice(ticker) {
   try {
     const q = await yf.quote(ticker);
     const state = q.marketState ?? null;
-    if (state === 'PRE' && q.preMarketPrice != null) {
-      return { price: q.preMarketPrice, source: 'pre', state, at: q.preMarketTime ?? null,
-               reference: q.regularMarketPrice ?? null };
-    }
-    if ((state === 'POST' || state === 'POSTPOST') && q.postMarketPrice != null) {
-      return { price: q.postMarketPrice, source: 'post', state, at: q.postMarketTime ?? null,
-               reference: q.regularMarketPrice ?? null };
-    }
-    if (q.regularMarketPrice != null) {
-      return { price: q.regularMarketPrice, source: state === 'REGULAR' ? 'live' : 'close',
-               state, at: q.regularMarketTime ?? null, reference: q.regularMarketPreviousClose ?? null };
-    }
+    const ms = (t) => (t == null ? 0 : new Date(t).getTime());
+
+    // Do not switch on the session name. Yahoo has more of them than the obvious
+    // three — PREPRE is the early hours before pre-market proper opens, and on a
+    // Monday morning it carries no pre-market price at all while still holding
+    // Friday evening's after-hours print. Matching only PRE and POST dropped
+    // through to the regular close and quietly served a stale price with no
+    // label on it. So gather every print on offer and take the most recent.
+    const candidates = [
+      { price: q.preMarketPrice, at: q.preMarketTime, source: 'pre' },
+      { price: q.postMarketPrice, at: q.postMarketTime, source: 'post' },
+      {
+        price: q.regularMarketPrice,
+        at: q.regularMarketTime,
+        source: state === 'REGULAR' ? 'live' : 'close',
+      },
+    ].filter((c) => c.price != null);
+
+    if (!candidates.length) return null;
+    const newest = candidates.reduce((best, c) => (ms(c.at) > ms(best.at) ? c : best));
+
+    return {
+      price: newest.price,
+      source: newest.source,
+      at: newest.at ?? null,
+      state,
+      // What to measure the change against: the regular close for an out-of-hours
+      // print, the previous close while the market is actually open.
+      reference: newest.source === 'live' || newest.source === 'close'
+        ? q.regularMarketPreviousClose ?? null
+        : q.regularMarketPrice ?? null,
+    };
   } catch (err) {
     console.warn(`  ! Live price unavailable for ${ticker}: ${err.message}`);
   }

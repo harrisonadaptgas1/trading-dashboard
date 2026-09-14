@@ -100,13 +100,20 @@ async function fetchPayload() {
  * than the two decimal places.
  */
 function liveBadge(live) {
-  if (!live?.used) return '';
-  const when = live.at
-    ? new Date(live.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-    : '';
+  if (!live?.at) return '';
+  const at = new Date(live.at);
+  const today = new Date().toDateString() === at.toDateString();
+  // A price from another day needs the day on it. "21:00" on a Monday morning
+  // reads as this morning unless it says Friday.
+  const when = at.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit',
+    ...(today ? {} : { weekday: 'short' }),
+  });
   const label = live.source === 'pre' ? 'Pre-market'
-    : live.source === 'post' ? 'After hours' : 'Live';
-  return `<div class="live-tag ${esc(live.source)}">${label}${when ? ' &middot; ' + when : ''}</div>`;
+    : live.source === 'post' ? 'After hours'
+    : live.source === 'live' ? 'Live'
+    : 'Last close';
+  return `<div class="live-tag ${esc(live.source)}">${label} &middot; ${esc(when)}</div>`;
 }
 function sparkline(values) {
   if (!values || values.length < 2) return '';
