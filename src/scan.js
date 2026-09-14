@@ -55,10 +55,14 @@ function sectorMedianPE(stocks) {
 async function collect(entries, config) {
   return mapWithLimit(entries, 3, async (entry) => {
     try {
-      const [data, news] = await Promise.all([
-        getStockData(entry),
-        getNews(yf, entry, config.news),
-      ]);
+      // Prices first, then news: the news filter needs the industry Yahoo returns
+      // with the fundamentals to tell a relevant sector story from an unrelated one.
+      const data = await getStockData(entry);
+      const news = await getNews(yf, {
+        ...entry,
+        sector: data.fundamentals.sector,
+        industry: data.fundamentals.industry,
+      }, config.news);
       console.log(`  ${entry.ticker.padEnd(6)} ok    ${data.price.toFixed(2).padEnd(9)} ${news.headlines.length} headlines`);
       return { data, news };
     } catch (err) {
@@ -203,11 +207,19 @@ function toCard(data, news, scored, config, peerMedianPE) {
     metrics: scored.metrics,
     sparkline: data.series.closes.slice(-n).map((v) => Number(v.toFixed(2))),
     newsSummary: news.summary,
-    headlines: news.headlines.slice(0, config.news.displayHeadlines).map((h) => ({
+    // Take company and sector news separately rather than off one sorted list.
+    // Company stories sort first, so a flat slice of two showed two company
+    // headlines and hid the sector story that was actually moving the price —
+    // ASML fell 5% on an AI-slowdown call it never got to mention.
+    headlines: [
+      ...news.headlines.filter((h) => h.scope === 'company').slice(0, config.news.displayHeadlines),
+      ...news.headlines.filter((h) => h.scope === 'sector').slice(0, config.news.displaySectorHeadlines ?? 2),
+    ].map((h) => ({
       title: h.title,
       link: h.link,
       publisher: h.publisher,
       published: h.published,
+      scope: h.scope,
       label: h.sentiment.label,
       catalyst: h.sentiment.catalyst,
     })),

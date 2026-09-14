@@ -41,6 +41,7 @@ async function getFundamentals(ticker) {
       currency: qs.price?.currency ?? 'USD',
       marketCap: qs.price?.marketCap ?? qs.summaryDetail?.marketCap ?? null,
       sector: qs.assetProfile?.sector ?? null,
+      industry: qs.assetProfile?.industry ?? null,
       trailingPE: qs.summaryDetail?.trailingPE ?? null,
       forwardPE: qs.summaryDetail?.forwardPE ?? null,
       earningsGrowth: qs.financialData?.earningsGrowth ?? null,
@@ -55,7 +56,7 @@ async function getFundamentals(ticker) {
     };
   } catch (err) {
     console.warn(`  ! Fundamentals unavailable for ${ticker}: ${err.message}`);
-    return { currency: 'USD', sector: null, trailingPE: null, forwardPE: null,
+    return { currency: 'USD', sector: null, industry: null, trailingPE: null, forwardPE: null,
              earningsGrowth: null, revenueGrowth: null, earningsDate: null, marketCap: null };
   }
 }

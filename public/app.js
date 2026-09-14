@@ -412,8 +412,13 @@ function headlineHtml(h) {
     ? new Date(h.published).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '';
   const tag = h.catalyst ? `<span class="tag">${esc(h.catalyst)}</span>` : '';
+  // A story about the whole sector explains a move without being news about this
+  // company. Saying so is the difference between context and a false attribution.
+  const scope = h.scope === 'sector'
+    ? '<span class="tag scope-sector">Sector</span>'
+    : '';
   return `<a class="headline" href="${esc(h.link)}" target="_blank" rel="noopener noreferrer">
-    <span class="h-meta"><span class="dot ${esc(h.label)}"></span>${tag}</span>
+    <span class="h-meta"><span class="dot ${esc(h.label)}"></span>${scope}${tag}</span>
     <span class="h-title">${esc(h.title)}</span>
     <span class="tag" style="margin-left:5px">${esc(h.publisher)}${when ? ' &middot; ' + esc(when) : ''}</span>
   </a>`;
@@ -590,7 +595,7 @@ function cardHtml(s, { collapsible = false } = {}) {
     ? `<div class="warn">${s.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : '';
   const news = s.headlines.length
     ? s.headlines.map(headlineHtml).join('')
-    : '<p class="no-news">No company-specific headlines in the last 48 hours.</p>';
+    : '<p class="no-news">Nothing found in the last 48 hours, about this company or its sector.</p>';
 
   return `<article class="card">
     <div class="row">

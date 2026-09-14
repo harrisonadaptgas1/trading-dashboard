@@ -636,3 +636,8 @@ details.hc[open] > summary::before { content: "▾ "; }
 }
 .facts strong { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
 .pos-share { margin-top: 8px; color: var(--muted); font-size: 0.74rem; }
+
+.tag.scope-sector {
+  background: rgba(217, 164, 65, 0.14); border-color: rgba(217, 164, 65, 0.4);
+  color: var(--ok);
+}
