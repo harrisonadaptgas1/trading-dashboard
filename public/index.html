@@ -15,6 +15,14 @@
 </head>
 <body>
 
+<!-- Backdrop. Three layers so each can move at its own rate: a static chart
+     grid, two slowly drifting colour blooms, and a chart line panning across.
+     Purely decorative, so it is hidden from screen readers. -->
+<div class="bg" aria-hidden="true">
+  <span class="bg-glow"></span>
+  <span class="bg-line"></span>
+</div>
+
 <main id="app">
   <header class="head">
     <div>
