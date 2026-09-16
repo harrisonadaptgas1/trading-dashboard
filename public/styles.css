@@ -18,6 +18,18 @@
    `display: grid` would keep the locked screen painted over the app. */
 [hidden] { display: none !important; }
 
+/* ---------- trading-floor backdrop ----------
+
+   A chart grid behind the app, with a faint rising trace across it and a cool
+   glow at the top. Built entirely from CSS gradients: no image to download, no
+   extra request, and nothing to go stale.
+
+   Deliberately near-invisible. This is a dense screen of numbers where contrast
+   is the whole job, so the grid sits at roughly 3% opacity — enough to read as
+   texture on a large screen, not enough to fight the text on a phone. It is
+   fixed rather than scrolling, so the cards slide over it instead of dragging it
+   along, and it sits in a ::before at z-index -1 so nothing has to be restacked.
+*/
 body {
   margin: 0;
   background: var(--bg);
@@ -26,6 +38,35 @@ body {
   -webkit-font-smoothing: antialiased;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* a cool wash at the top, warming the flat black */
+    radial-gradient(120% 70% at 50% -10%, rgba(91, 141, 239, 0.10), transparent 70%),
+    /* the rising trace: two soft diagonals suggesting a chart line */
+    linear-gradient(101deg, transparent 38%, rgba(53, 199, 127, 0.05) 39.2%, transparent 40.4%),
+    linear-gradient(97deg, transparent 62%, rgba(53, 199, 127, 0.035) 62.9%, transparent 63.8%),
+    /* chart grid */
+    repeating-linear-gradient(0deg, rgba(147, 155, 171, 0.05) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(90deg, rgba(147, 155, 171, 0.05) 0 1px, transparent 1px 64px);
+}
+
+/* The grid is decoration. Anyone who has asked for less motion or more contrast
+   should not have to look at it. */
+@media (prefers-contrast: more) {
+  body::before { display: none; }
+}
+
+/* Cards stay fully opaque. A 2px blur behind a card that is already 92% solid
+   is invisible, and backdrop-filter on twenty-odd cards costs real frames on a
+   phone. The grid shows in the gaps between cards, which is where it belongs.
+*/
+
 
 h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
 
